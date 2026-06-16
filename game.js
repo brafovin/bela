@@ -26,6 +26,13 @@ let fanGroups = {};
 let grandstandSegs = [];
 let stars = [];
 
+let trainer = {
+  message: '', timer: 0, totalTime: 0,
+  face: 'neutral',   // 'neutral' | 'happy' | 'excited' | 'worried'
+  cooldown: 0,
+  lastLap: 0, lastPos: -1, startMsgSent: false,
+};
+
 const keys = {};
 
 // ── boot ───────────────────────────────────────────────────
@@ -172,6 +179,7 @@ function buildRace() {
   raceFinished = false;
   document.getElementById('hud-track').textContent = track.name;
   document.getElementById('hud-driver').textContent = `${playerDriver.name}`;
+  trainer = { message: '', timer: 0, totalTime: 0, face: 'neutral', cooldown: 0, lastLap: 0, lastPos: -1, startMsgSent: false };
   buildFans();
 }
 
@@ -295,6 +303,7 @@ function update(dt) {
   });
 
   updateHUD();
+  updateTrainer(dt);
   checkRaceEnd();
 }
 
@@ -692,6 +701,7 @@ function render() {
   drawTrack();
   drawStartFinish();
   drawCars();
+  drawTrainer();
 }
 
 function drawFans() {
@@ -1049,6 +1059,256 @@ function drawCarShape(c, team, x, y, l, w) {
       c.fillStyle = 'rgba(255,255,255,0.22)';
       c.beginPath(); c.ellipse(ex-rx*0.28,ey-ry*0.28,rx*0.38,ry*0.32,0,0,Math.PI*2); c.fill();
     });
+}
+
+// ── TRAINER (Race Engineer) ──────────────────────────────────
+
+function trainerSay(msg, duration, face = 'neutral', force = false) {
+  if (!force && trainer.cooldown > 0 && trainer.timer > 0.5) return;
+  trainer.message   = msg;
+  trainer.timer     = duration;
+  trainer.totalTime = duration;
+  trainer.face      = face;
+  trainer.cooldown  = duration + (force ? 4 : 8);
+}
+
+function updateTrainer(dt) {
+  if (!playerCar) return;
+  trainer.timer    -= dt;
+  trainer.cooldown -= dt;
+
+  const pos = getPlayerPos();
+  const lap = playerCar.laps + 1;
+
+  // Begrüßung zu Rennstart (einmalig)
+  if (!trainer.startMsgSent) {
+    trainer.startMsgSent = true;
+    trainer.lastPos = pos;
+    trainer.lastLap = lap;
+    trainerSay('Los geht\'s! Viel Erfolg im Rennen!', 5, 'excited', true);
+    return;
+  }
+
+  // Letzte Runde (einmalig)
+  if (lap === NUM_LAPS && trainer.lastLap < NUM_LAPS) {
+    trainer.lastLap = NUM_LAPS;
+    trainerSay('LETZTE RUNDE! Alles geben jetzt!', 5, 'excited', true);
+    return;
+  }
+
+  // Neue Runde
+  if (lap > trainer.lastLap) {
+    trainer.lastLap = lap;
+    trainerSay(`Runde ${lap} von ${NUM_LAPS}! Fokus bleiben!`, 4, 'neutral', true);
+    return;
+  }
+
+  // Überholmöglichkeit — Fahrer direkt vor uns
+  if (pos > 1 && trainer.cooldown <= 0) {
+    const sorted = getPositions();
+    const pidx = sorted.findIndex(c => c.isPlayer);
+    if (pidx > 0) {
+      const ahead = sorted[pidx - 1];
+      if (Math.hypot(ahead.x - playerCar.x, ahead.y - playerCar.y) < 42) {
+        trainerSay('Er ist direkt vor dir! Jetzt überholen!', 4, 'excited', true);
+        return;
+      }
+    }
+  }
+
+  // Positionswechsel
+  if (trainer.lastPos !== -1 && pos !== trainer.lastPos) {
+    if (pos < trainer.lastPos) {
+      trainerSay(`P${pos}! Gut überholt! Weiter so!`, 4, 'happy', true);
+    } else {
+      trainerSay('Er hat uns überholt! Gegenangriff!', 4, 'worried', true);
+    }
+    trainer.lastPos = pos;
+    return;
+  }
+  trainer.lastPos = pos;
+
+  // Regelmäßige Tipps (nur wenn Cooldown abgelaufen)
+  if (trainer.cooldown > 0) return;
+
+  const pool = [];
+  if (!playerCar.finished && playerCar.speed < 22) {
+    pool.push(['Mehr Gas! Du bist viel zu langsam!', 'worried']);
+    pool.push(['Vollgas! Keine Zeit verlieren!', 'worried']);
+  }
+  if (pos === 1) {
+    pool.push(['Ausgezeichnet! Du führst das Rennen!', 'happy']);
+    pool.push(['Halte den Vorsprung, sauber durch die Kurven!', 'happy']);
+  } else if (pos <= 3) {
+    pool.push([`P${pos} – du bist auf dem Podium! Drück weiter!`, 'happy']);
+    pool.push(['Der Fahrer vor dir ist in Reichweite!', 'excited']);
+  } else if (pos <= 6) {
+    pool.push([`P${pos} – bleib am Ball, Punkte sind in Griffweite!`, 'neutral']);
+    pool.push(['Bremse später in den Kurven für mehr Tempo!', 'neutral']);
+  } else if (pos <= 10) {
+    pool.push([`P${pos} – du kannst mehr! Sei aggressiver!`, 'worried']);
+    pool.push(['Such dir eine Lücke und greif an!', 'neutral']);
+  } else {
+    pool.push([`P${pos} – Aufholjagd! Volles Risiko jetzt!`, 'worried']);
+    pool.push(['Sei mutiger in den Kurven!', 'worried']);
+  }
+  pool.push(['Nutze den Windschatten der Fahrer vor dir!', 'neutral']);
+  pool.push(['Ideallinie fahren gibt dir mehr Geschwindigkeit!', 'neutral']);
+  pool.push(['Bremspunkt anvisieren, dann voll raus aus der Kurve!', 'neutral']);
+  pool.push(['Bleib auf der Strecke, vermeide das Gras!', 'neutral']);
+
+  const [msg, face] = pool[Math.floor(Math.random() * pool.length)];
+  trainerSay(msg, 5, face);
+}
+
+function wrapText(text, maxW) {
+  ctx.font = 'bold 11px Arial';
+  const words = text.split(' ');
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = w; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function drawEngineerFace(cx, cy, mood) {
+  // Jacket/collar
+  ctx.fillStyle = '#1a1a30';
+  ctx.fillRect(cx - 9, cy + 11, 18, 12);
+  ctx.fillStyle = '#e10600';
+  ctx.fillRect(cx - 9, cy + 11, 5, 12);
+
+  // Head
+  ctx.fillStyle = '#c8904a';
+  ctx.beginPath(); ctx.ellipse(cx, cy, 13, 14, 0, 0, Math.PI * 2); ctx.fill();
+
+  // Headset band
+  ctx.strokeStyle = '#3a3a3a';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(cx, cy - 1, 16, Math.PI * 0.88, Math.PI * 0.12, false); ctx.stroke();
+
+  // Ear cups
+  ctx.fillStyle = '#2a2a2a';
+  ctx.beginPath(); ctx.arc(cx - 16, cy, 5.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 16, cy, 5.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#111';
+  ctx.beginPath(); ctx.arc(cx - 16, cy, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 16, cy, 3, 0, Math.PI * 2); ctx.fill();
+
+  // Microphone arm
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx - 16, cy + 4);
+  ctx.quadraticCurveTo(cx - 24, cy + 10, cx - 21, cy + 15);
+  ctx.stroke();
+  ctx.fillStyle = '#111';
+  ctx.beginPath(); ctx.arc(cx - 21, cy + 16, 2.5, 0, Math.PI * 2); ctx.fill();
+
+  // Eyes
+  ctx.fillStyle = '#111';
+  ctx.beginPath(); ctx.ellipse(cx - 5, cy - 1, 2.5, 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(cx + 5, cy - 1, 2.5, 3, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(cx - 4, cy - 2.5, 1, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx + 6, cy - 2.5, 1, 0, Math.PI * 2); ctx.fill();
+
+  // Eyebrows
+  ctx.strokeStyle = '#3a2a18';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  if (mood === 'worried') {
+    ctx.moveTo(cx - 8, cy - 7); ctx.lineTo(cx - 2, cy - 5.5);
+    ctx.moveTo(cx + 2, cy - 5.5); ctx.lineTo(cx + 8, cy - 7);
+  } else if (mood === 'excited') {
+    ctx.moveTo(cx - 8, cy - 9); ctx.lineTo(cx - 2, cy - 8);
+    ctx.moveTo(cx + 2, cy - 8); ctx.lineTo(cx + 8, cy - 9);
+  } else if (mood === 'happy') {
+    ctx.moveTo(cx - 8, cy - 7); ctx.lineTo(cx - 2, cy - 9);
+    ctx.moveTo(cx + 2, cy - 9); ctx.lineTo(cx + 8, cy - 7);
+  } else {
+    ctx.moveTo(cx - 8, cy - 7); ctx.lineTo(cx - 2, cy - 7);
+    ctx.moveTo(cx + 2, cy - 7); ctx.lineTo(cx + 8, cy - 7);
+  }
+  ctx.stroke();
+
+  // Mouth
+  ctx.strokeStyle = '#3a2a18';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (mood === 'happy' || mood === 'excited') {
+    ctx.arc(cx, cy + 6, 5, 0.3, Math.PI - 0.3);
+  } else if (mood === 'worried') {
+    ctx.arc(cx, cy + 12, 5, Math.PI + 0.3, -0.3);
+  } else {
+    ctx.moveTo(cx - 5, cy + 7); ctx.lineTo(cx + 5, cy + 7);
+  }
+  ctx.stroke();
+}
+
+function drawTrainer() {
+  if (!trainer.message || trainer.timer <= 0 || state !== 'race') return;
+
+  const fadeIn  = Math.min(1, (trainer.totalTime - trainer.timer) / 0.35);
+  const fadeOut = Math.min(1, trainer.timer / 0.4);
+  const alpha   = Math.min(fadeIn, fadeOut);
+  if (alpha <= 0.01) return;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+
+  const FACE = 50, PAD = 8;
+  ctx.font = 'bold 11px Arial';
+  const lines = wrapText(trainer.message, 205);
+  const textH = lines.length * 16;
+  const boxW  = FACE + PAD * 3 + 205;
+  const boxH  = Math.max(FACE + 16, textH + 22);
+  const bx = 10, by = CH - boxH - 10;
+
+  // Panel background
+  const bg = ctx.createLinearGradient(bx, by, bx, by + boxH);
+  bg.addColorStop(0, 'rgba(6,6,18,0.97)');
+  bg.addColorStop(1, 'rgba(14,14,32,0.95)');
+  ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.roundRect(bx, by, boxW, boxH, 10); ctx.fill();
+
+  // Accent border
+  const accent = { excited: '#e10600', happy: '#00e5ff', worried: '#ffcc00', neutral: '#4488ff' }[trainer.face];
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = alpha * 0.6;
+  ctx.beginPath(); ctx.roundRect(bx, by, boxW, boxH, 10); ctx.stroke();
+  ctx.globalAlpha = alpha;
+
+  // Engineer face
+  drawEngineerFace(bx + FACE * 0.5 + 8, by + boxH * 0.5, trainer.face);
+
+  // Blinking FUNK label
+  const blink = Math.floor(performance.now() / 450) % 2 === 0;
+  ctx.fillStyle = blink ? '#e10600' : '#880000';
+  ctx.font = 'bold 8px Arial';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText('● FUNK', bx + FACE * 0.5 + 8, by + 5);
+
+  // Separator line
+  const sepX = bx + FACE + PAD * 2;
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(sepX, by + 8); ctx.lineTo(sepX, by + boxH - 8); ctx.stroke();
+
+  // Message text
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 11px Arial';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  const startY = by + boxH / 2 - (textH - 16) / 2;
+  lines.forEach((line, i) => ctx.fillText(line, sepX + PAD, startY + i * 16));
+
+  ctx.restore();
 }
 
 function drawMiniStandings() {

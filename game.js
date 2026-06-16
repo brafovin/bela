@@ -959,36 +959,8 @@ function drawCarShape(c, team, x, y, l, w) {
   c.roundRect(x, y - hw*0.5, hl*0.38, hw, 2);
   c.stroke();
 
-  // ── Side mirrors ──────────────────────────────────────────
-  c.fillStyle = team.color2;
-  c.fillRect(x + hl*0.06, y - hw - 2, 5, 2);
-  c.fillRect(x + hl*0.06, y + hw,     5, 2);
-
-  // ── Rear wing with DRS gap and endplate caps ──────────────
-  c.fillStyle = team.color2;
-  c.fillRect(x - hl - 6, y - hw*1.48, 9, w*1.48*2);
-  c.fillStyle = team.color1;
-  c.fillRect(x - hl - 7, y - hw*1.48,     4, 3);
-  c.fillRect(x - hl - 7, y + hw*1.48 - 3, 4, 3);
-  c.fillStyle = 'rgba(0,0,0,0.5)';
-  c.fillRect(x - hl - 6, y - 1, 9, 2);
-
-  // ── Front wing with endplates ─────────────────────────────
-  c.fillStyle = team.color1;
-  c.fillRect(x + hl + 2, y - hw*1.3, 7, w*1.3*2);
-  c.fillStyle = team.color2;
-  c.fillRect(x + hl + 8, y - hw*1.3,     2, 4);
-  c.fillRect(x + hl + 8, y + hw*1.3 - 4, 2, 4);
-
-  // ── Headlights at nose tip ────────────────────────────────
-  c.shadowBlur = 5; c.shadowColor = '#ffffaa';
-  c.fillStyle  = '#ffffcc';
-  c.beginPath(); c.arc(x + hl + 1, y - hw*0.3, 1.5, 0, Math.PI*2); c.fill();
-  c.beginPath(); c.arc(x + hl + 1, y + hw*0.3, 1.5, 0, Math.PI*2); c.fill();
-  c.shadowBlur = 0;
-
   // ── Wheels: tyre + silver rim + hub + shine ───────────────
-  const wx1 = x + hl*0.4, wx2 = x - hl*0.4, wy = hw + 2;
+  const wx1 = x + hl*0.4, wx2 = x - hl*0.4, wy = hw + 1;
   [[wx1,-wy,3,4.2],[wx1,wy,3,4.2],[wx2,-wy-0.5,3.8,5.2],[wx2,wy+0.5,3.8,5.2]]
     .forEach(([ex, ey, rx, ry]) => {
       c.fillStyle = '#141414';

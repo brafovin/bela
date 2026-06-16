@@ -558,156 +558,249 @@ function showChampion() {
 
 // ── RENDER ───────────────────────────────────────────────────
 function render() {
-  ctx.clearRect(0,0,CW,CH);
-  ctx.fillStyle = '#1a5a1a';
-  ctx.fillRect(0,0,CW,CH);
+  // Grass with radial gradient vignette
+  const bg = ctx.createRadialGradient(CW*0.5, CH*0.5, 50, CW*0.5, CH*0.5, CW*0.72);
+  bg.addColorStop(0, '#206622');
+  bg.addColorStop(1, '#0d3d0f');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, CW, CH);
+
+  // Subtle grass grid texture
+  ctx.strokeStyle = 'rgba(0,0,0,0.07)';
+  ctx.lineWidth = 1;
+  for (let gx = 0; gx < CW; gx += 28) { ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,CH); ctx.stroke(); }
+  for (let gy = 0; gy < CH; gy += 28) { ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(CW,gy); ctx.stroke(); }
 
   drawTrack();
-  drawCars();
   drawStartFinish();
+  drawCars();
 }
 
 function drawTrack() {
   const wp = track.waypoints;
   const n  = wp.length;
+  ctx.lineCap  = 'round';
+  ctx.lineJoin = 'round';
 
-  // Road surface
-  ctx.strokeStyle = '#555';
-  ctx.lineWidth   = track.width;
-  ctx.lineCap     = 'round';
-  ctx.lineJoin    = 'round';
-  ctx.beginPath();
-  ctx.moveTo(wp[0].x, wp[0].y);
-  for (let i=1; i<n; i++) ctx.lineTo(wp[i].x, wp[i].y);
-  ctx.closePath();
-  ctx.stroke();
+  const path = () => {
+    ctx.beginPath();
+    ctx.moveTo(wp[0].x, wp[0].y);
+    for (let i = 1; i < n; i++) ctx.lineTo(wp[i].x, wp[i].y);
+    ctx.closePath();
+  };
 
-  // Kerb borders (red/white stripes)
-  ctx.strokeStyle = '#fff';
+  // Drop shadow beneath the track
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth   = track.width + 20;
+  path(); ctx.stroke();
+
+  // Kerb — solid red base
+  ctx.strokeStyle = '#be0000';
   ctx.lineWidth   = track.width + 10;
-  ctx.setLineDash([20, 20]);
-  ctx.beginPath();
-  ctx.moveTo(wp[0].x, wp[0].y);
-  for (let i=1; i<n; i++) ctx.lineTo(wp[i].x, wp[i].y);
-  ctx.closePath();
-  ctx.stroke();
   ctx.setLineDash([]);
+  path(); ctx.stroke();
 
-  // Re-draw road over kerb
-  ctx.strokeStyle = '#666';
-  ctx.lineWidth   = track.width - 4;
-  ctx.beginPath();
-  ctx.moveTo(wp[0].x, wp[0].y);
-  for (let i=1; i<n; i++) ctx.lineTo(wp[i].x, wp[i].y);
-  ctx.closePath();
-  ctx.stroke();
+  // Kerb — white alternating stripes overlaid on red
+  ctx.strokeStyle = '#f0f0f0';
+  ctx.lineWidth   = track.width + 10;
+  ctx.setLineDash([15, 15]);
+  ctx.lineDashOffset = 15;
+  path(); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.lineDashOffset = 0;
 
-  // Center dashed line
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth   = 2;
-  ctx.setLineDash([14,14]);
-  ctx.beginPath();
-  ctx.moveTo(wp[0].x, wp[0].y);
-  for (let i=1; i<n; i++) ctx.lineTo(wp[i].x, wp[i].y);
-  ctx.closePath();
-  ctx.stroke();
+  // Asphalt surface
+  ctx.strokeStyle = '#232323';
+  ctx.lineWidth   = track.width;
+  path(); ctx.stroke();
+
+  // Lighter worn racing-line band through the center
+  ctx.strokeStyle = '#2b2b2b';
+  ctx.lineWidth   = track.width * 0.5;
+  path(); ctx.stroke();
+
+  // White center dashed line
+  ctx.strokeStyle = 'rgba(255,255,255,0.32)';
+  ctx.lineWidth   = 1.5;
+  ctx.setLineDash([18, 10]);
+  path(); ctx.stroke();
   ctx.setLineDash([]);
 }
 
 function drawStartFinish() {
   const wp = track.waypoints;
   const p0 = wp[0], p1 = wp[1];
-  const dx = p1.x-p0.x, dy = p1.y-p0.y;
-  const len = Math.hypot(dx,dy);
-  const px = -dy/len, py = dx/len;
-  const hw = track.width/2 + 8;
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const len = Math.hypot(dx, dy);
+  const ttx = dx/len, tty = dy/len;
+  const nnx = -tty, nny = ttx;
+  const hw  = track.width / 2 + 2;
 
+  // Checkered flag tiles
+  const tW = 8, tH = 7, cols = Math.ceil(hw * 2 / tW), rows = 3;
   ctx.save();
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth   = 4;
-  ctx.setLineDash([8,8]);
-  ctx.beginPath();
-  ctx.moveTo(p0.x + px*hw, p0.y + py*hw);
-  ctx.lineTo(p0.x - px*hw, p0.y - py*hw);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const bx = p0.x + nnx * (-hw + (c+0.5)*tW) + ttx * (r - rows/2 + 0.5)*tH;
+      const by = p0.y + nny * (-hw + (c+0.5)*tW) + tty * (r - rows/2 + 0.5)*tH;
+      ctx.fillStyle = (r + c) % 2 === 0 ? '#fff' : '#111';
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.rotate(Math.atan2(tty, ttx));
+      ctx.fillRect(-tW/2, -tH/2, tW, tH);
+      ctx.restore();
+    }
+  }
   ctx.restore();
 }
 
 function drawCars() {
-  // Draw all AI cars first, player on top
   const sorted = [...cars].filter(c => !c.isPlayer);
   sorted.push(playerCar);
 
   sorted.forEach(car => {
+    // Motion blur trail for fast cars
+    if (car.speed > 40) {
+      const t = Math.min(1, (car.speed - 40) / 80);
+      for (let b = 3; b >= 1; b--) {
+        ctx.save();
+        ctx.globalAlpha = t * 0.09 / b;
+        ctx.translate(car.x - Math.cos(car.angle)*b*5, car.y - Math.sin(car.angle)*b*5);
+        ctx.rotate(car.angle);
+        drawCarShape(ctx, car.team, 0, 0, CAR_L, CAR_W);
+        ctx.restore();
+      }
+    }
+
+    // Car ground shadow
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.36)';
+    ctx.beginPath();
+    ctx.ellipse(car.x+2, car.y+3, CAR_L*0.52, CAR_W*0.65, car.angle, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // Car body
     ctx.save();
     ctx.translate(car.x, car.y);
     ctx.rotate(car.angle);
     drawCarShape(ctx, car.team, 0, 0, CAR_L, CAR_W);
 
-    // Number on car
-    ctx.fillStyle = isLight(car.team.color1) ? '#000' : '#fff';
-    ctx.font = `bold ${CAR_W * 0.65}px Arial`;
+    // Driver number
+    ctx.fillStyle = isLight(car.team.color1) ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.92)';
+    ctx.font = `bold ${Math.round(CAR_W*0.62)}px Arial`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(car.driver.num, 0, 0);
     ctx.restore();
 
-    // Player highlight
+    // Player glow ring
     if (car.isPlayer) {
       ctx.save();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth   = 2;
-      ctx.shadowBlur  = 12;
+      ctx.shadowBlur  = 18;
       ctx.shadowColor = '#ffffff';
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth   = 1.5;
       ctx.beginPath();
-      ctx.ellipse(car.x, car.y, CAR_L*0.75, CAR_W*1.1, car.angle, 0, Math.PI*2);
+      ctx.ellipse(car.x, car.y, CAR_L*0.7, CAR_W*1.18, car.angle, 0, Math.PI*2);
       ctx.stroke();
       ctx.restore();
     }
   });
 
-  // Mini positions table (top-right corner)
   drawMiniStandings();
 }
 
 function drawCarShape(c, team, x, y, l, w) {
-  // Body
+  const hl = l/2, hw = w/2;
+
+  // Body: tapered F1 silhouette — wide rear, pointed nose
   c.fillStyle = team.color1;
   c.beginPath();
-  c.roundRect(x - l/2, y - w/2, l, w, 3);
+  c.moveTo(x + hl + 3,   y);              // nose tip
+  c.lineTo(x + hl*0.4,   y - hw);         // front shoulder top
+  c.lineTo(x - hl*0.45,  y - hw);         // rear shoulder top
+  c.lineTo(x - hl,       y - hw*0.72);    // rear corner top
+  c.lineTo(x - hl,       y + hw*0.72);    // rear corner bottom
+  c.lineTo(x - hl*0.45,  y + hw);         // rear shoulder bottom
+  c.lineTo(x + hl*0.4,   y + hw);         // front shoulder bottom
+  c.closePath();
   c.fill();
-  // Cockpit stripe in secondary color
+
+  // Secondary colour livery stripe
   c.fillStyle = team.color2;
-  c.fillRect(x - 2, y - w/2 + 1, 7, w - 2);
-  // Rear wing
+  c.fillRect(x - hl*0.38, y - hw + 1, hl*0.5, w - 2);
+
+  // Cockpit (dark opening from above)
+  c.fillStyle = 'rgba(0,0,0,0.75)';
+  c.beginPath();
+  c.ellipse(x + hl*0.1, y, hl*0.2, hw*0.52, 0, 0, Math.PI*2);
+  c.fill();
+
+  // Rear wing cross-bar
+  c.fillStyle = team.color2;
+  c.fillRect(x - hl - 5, y - hw*1.4, 7, w*1.4*2);
   c.fillStyle = team.color1;
-  c.fillRect(x - l/2 - 3, y - w/2 - 2, 5, w + 4);
-  // Front wing
-  c.fillStyle = team.color2;
-  c.fillRect(x + l/2 - 1, y - w/2 - 1, 5, w + 2);
+  c.fillRect(x - hl - 5, y - hw*1.4,       7, 2);
+  c.fillRect(x - hl - 5, y + hw*1.4 - 2,   7, 2);
+
+  // Front wing plate
+  c.fillStyle = team.color1;
+  c.fillRect(x + hl + 1, y - hw*1.25, 5, w*1.25*2);
+
+  // Wheels — 4 black rubber ellipses with shine highlight
+  const wx1 = x + hl*0.44, wx2 = x - hl*0.44, wy = hw + 1.5;
+  [[wx1,-wy,2.5,3.5],[wx1,wy,2.5,3.5],[wx2,-wy-0.5,3,4.5],[wx2,wy+0.5,3,4.5]]
+    .forEach(([ex,ey,rx,ry]) => {
+      c.fillStyle = '#141414';
+      c.beginPath(); c.ellipse(ex,ey,rx,ry,0,0,Math.PI*2); c.fill();
+      c.fillStyle = 'rgba(255,255,255,0.12)';
+      c.beginPath(); c.ellipse(ex-rx*0.3,ey-ry*0.3,rx*0.45,ry*0.38,0,0,Math.PI*2); c.fill();
+    });
 }
 
 function drawMiniStandings() {
   const positions = getPositions().slice(0, 8);
-  const x = CW - 160, y = 50;
-  ctx.fillStyle = 'rgba(0,0,0,.6)';
-  ctx.beginPath();
-  ctx.roundRect(x-8, y-8, 160, positions.length*22+10, 8);
-  ctx.fill();
+  const pW = 162, rH = 22, pH = positions.length*rH + 18;
+  const px = CW - pW - 8, py = 8;
+
+  // Gradient panel
+  const g = ctx.createLinearGradient(px, py, px, py+pH);
+  g.addColorStop(0, 'rgba(8,8,18,0.9)');
+  g.addColorStop(1, 'rgba(18,18,32,0.85)');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.roundRect(px, py, pW, pH, 10); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+  ctx.lineWidth = 1; ctx.stroke();
 
   positions.forEach((car, i) => {
     const isP = car.isPlayer;
-    ctx.fillStyle = isP ? '#FFD700' : '#ccc';
-    ctx.font = `bold ${isP?11:10}px Arial`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`${i+1}. ${car.driver.name.split(' ').pop()}`, x, y + i*22);
-    // Color dot
+    const ry  = py + 9 + i*rH;
+
+    // Player row tint
+    if (isP) {
+      ctx.fillStyle = 'rgba(225,6,0,0.22)';
+      ctx.beginPath(); ctx.roundRect(px+3, ry-1, pW-6, rH-2, 5); ctx.fill();
+    }
+
+    // Position number (gold/silver/bronze for top 3)
+    ctx.fillStyle = i===0 ? '#FFD700' : i===1 ? '#C0C0C0' : i===2 ? '#CD7F32' : isP ? '#FFD700' : '#666';
+    ctx.font = 'bold 10px Arial';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(i+1, px+20, ry+8);
+
+    // Team colour dot (outer = primary, inner = secondary)
     ctx.fillStyle = car.team.color1;
-    ctx.beginPath();
-    ctx.arc(x - 5, y + i*22 + 6, 4, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(px+28, ry+8, 4.5, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = car.team.color2;
+    ctx.beginPath(); ctx.arc(px+28, ry+8, 2,   0, Math.PI*2); ctx.fill();
+
+    // Driver last name
+    ctx.fillStyle = isP ? '#FFD700' : '#d0d0d0';
+    ctx.font = isP ? 'bold 11px Arial' : '10px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText(car.driver.name.split(' ').pop(), px+37, ry+8);
   });
 }
 

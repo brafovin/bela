@@ -4,7 +4,7 @@
 
 const CW = 920, CH = 580;
 const NUM_LAPS  = 5;
-const CAR_L = 24, CAR_W = 11;   // car size px
+const CAR_L = 30, CAR_W = 13;   // car size px
 
 // ── state ──────────────────────────────────────────────────
 let canvas, ctx;
@@ -21,6 +21,8 @@ let countdownTimer = 0;
 let lastTs       = null;
 let rafId        = null;
 let raceFinished = false;
+let fans = [];
+let fanGroups = {};
 
 const keys = {};
 
@@ -155,6 +157,55 @@ function buildRace() {
   raceFinished = false;
   document.getElementById('hud-track').textContent = track.name;
   document.getElementById('hud-driver').textContent = `${playerDriver.name}`;
+  buildFans();
+}
+
+// ── FANS / CROWD ────────────────────────────────────────────
+function buildFans() {
+  fans = [];
+  fanGroups = {};
+  const wp   = track.waypoints;
+  const n    = wp.length;
+  const palette = [
+    '#e10600','#e10600',           // lots of red (Ferrari fans)
+    '#FF8000','#FF8000',           // orange (McLaren)
+    '#00D2BE','#1E1E5E',           // Mercedes / RB
+    '#ffffff','#f5e400',           // white / yellow neutrals
+    '#0055cc','#cc0055',
+  ];
+
+  for (let i = 0; i < n; i += 6) {
+    const cur  = wp[i];
+    const fwd  = wp[(i + 3) % n];
+    const dx   = fwd.x - cur.x, dy = fwd.y - cur.y;
+    const len  = Math.hypot(dx, dy);
+    if (len < 0.001) continue;
+    const nx = -dy/len, ny = dx/len;  // perpendicular
+    const tx =  dx/len, ty = dy/len;  // along-track
+
+    for (const side of [-1, 1]) {
+      for (let row = 0; row < 4; row++) {
+        const d = track.width/2 + 14 + row * 5.5;
+        for (let s = -4; s <= 4; s++) {
+          const fx = cur.x + nx*side*d + tx*s*3 + (Math.random()-0.5)*2;
+          const fy = cur.y + ny*side*d + ty*s*3 + (Math.random()-0.5)*2;
+          if (fx < 8 || fx > CW-8 || fy < 8 || fy > CH-8) continue;
+          fans.push({
+            x: fx, y: fy,
+            color: palette[Math.floor(Math.random() * palette.length)],
+            phase: Math.random() * Math.PI * 2,
+            size: 1.7 + Math.random() * 1.3,
+          });
+        }
+      }
+    }
+  }
+
+  // Pre-group by colour so drawFans only changes fillStyle once per colour
+  fans.forEach(f => {
+    if (!fanGroups[f.color]) fanGroups[f.color] = [];
+    fanGroups[f.color].push(f);
+  });
 }
 
 // ── COUNTDOWN ───────────────────────────────────────────────
@@ -571,9 +622,22 @@ function render() {
   for (let gx = 0; gx < CW; gx += 28) { ctx.beginPath(); ctx.moveTo(gx,0); ctx.lineTo(gx,CH); ctx.stroke(); }
   for (let gy = 0; gy < CH; gy += 28) { ctx.beginPath(); ctx.moveTo(0,gy); ctx.lineTo(CW,gy); ctx.stroke(); }
 
+  drawFans();
   drawTrack();
   drawStartFinish();
   drawCars();
+}
+
+function drawFans() {
+  const t = raceTime || 0;
+  for (const [color, group] of Object.entries(fanGroups)) {
+    ctx.fillStyle = color;
+    group.forEach(f => {
+      const wave = Math.sin(f.phase + t * 3.5) * 1.4;
+      const s = f.size;
+      ctx.fillRect(f.x - s, f.y - s + wave, s * 2, s * 2);
+    });
+  }
 }
 
 function drawTrack() {
@@ -714,48 +778,91 @@ function drawCars() {
 function drawCarShape(c, team, x, y, l, w) {
   const hl = l/2, hw = w/2;
 
-  // Body: tapered F1 silhouette — wide rear, pointed nose
+  // ── Main body (tapered: pointed nose, wide rear) ──────────
   c.fillStyle = team.color1;
   c.beginPath();
-  c.moveTo(x + hl + 3,   y);              // nose tip
-  c.lineTo(x + hl*0.4,   y - hw);         // front shoulder top
-  c.lineTo(x - hl*0.45,  y - hw);         // rear shoulder top
-  c.lineTo(x - hl,       y - hw*0.72);    // rear corner top
-  c.lineTo(x - hl,       y + hw*0.72);    // rear corner bottom
-  c.lineTo(x - hl*0.45,  y + hw);         // rear shoulder bottom
-  c.lineTo(x + hl*0.4,   y + hw);         // front shoulder bottom
+  c.moveTo(x + hl + 4,   y);
+  c.lineTo(x + hl*0.32,  y - hw*0.92);
+  c.lineTo(x - hl*0.38,  y - hw);
+  c.lineTo(x - hl,       y - hw*0.68);
+  c.lineTo(x - hl,       y + hw*0.68);
+  c.lineTo(x - hl*0.38,  y + hw);
+  c.lineTo(x + hl*0.32,  y + hw*0.92);
   c.closePath();
   c.fill();
 
-  // Secondary colour livery stripe
+  // ── Livery sidepod stripe (secondary colour) ──────────────
   c.fillStyle = team.color2;
-  c.fillRect(x - hl*0.38, y - hw + 1, hl*0.5, w - 2);
-
-  // Cockpit (dark opening from above)
-  c.fillStyle = 'rgba(0,0,0,0.75)';
   c.beginPath();
-  c.ellipse(x + hl*0.1, y, hl*0.2, hw*0.52, 0, 0, Math.PI*2);
+  c.moveTo(x + hl*0.22,  y - hw*0.92);
+  c.lineTo(x - hl*0.32,  y - hw);
+  c.lineTo(x - hl*0.44,  y - hw*0.48);
+  c.lineTo(x + hl*0.08,  y - hw*0.48);
+  c.closePath();
+  c.fill();
+  c.beginPath();
+  c.moveTo(x + hl*0.22,  y + hw*0.92);
+  c.lineTo(x - hl*0.32,  y + hw);
+  c.lineTo(x - hl*0.44,  y + hw*0.48);
+  c.lineTo(x + hl*0.08,  y + hw*0.48);
+  c.closePath();
   c.fill();
 
-  // Rear wing cross-bar
+  // ── Engine cover highlight ────────────────────────────────
+  c.fillStyle = 'rgba(255,255,255,0.06)';
+  c.beginPath();
+  c.ellipse(x - hl*0.08, y - hw*0.28, hl*0.48, hw*0.22, 0, 0, Math.PI*2);
+  c.fill();
+
+  // ── Cockpit opening ───────────────────────────────────────
+  c.fillStyle = '#08080f';
+  c.beginPath();
+  c.ellipse(x + hl*0.12, y, hl*0.19, hw*0.46, 0, 0, Math.PI*2);
+  c.fill();
+
+  // ── Halo safety device (thin frame around cockpit) ────────
+  const haloColor = team.color2 === '#000000' || team.color2 === '#080000' ? '#999' : team.color2;
+  c.strokeStyle = haloColor;
+  c.lineWidth   = 1.6;
+  c.beginPath();
+  c.roundRect(x + hl*0.0, y - hw*0.5, hl*0.38, hw, 2);
+  c.stroke();
+
+  // ── Side mirrors ──────────────────────────────────────────
   c.fillStyle = team.color2;
-  c.fillRect(x - hl - 5, y - hw*1.4, 7, w*1.4*2);
-  c.fillStyle = team.color1;
-  c.fillRect(x - hl - 5, y - hw*1.4,       7, 2);
-  c.fillRect(x - hl - 5, y + hw*1.4 - 2,   7, 2);
+  c.fillRect(x + hl*0.06, y - hw - 2,  5, 2);
+  c.fillRect(x + hl*0.06, y + hw,       5, 2);
 
-  // Front wing plate
+  // ── Rear wing ─────────────────────────────────────────────
+  c.fillStyle = team.color2;
+  c.fillRect(x - hl - 6,  y - hw*1.48, 9, w*1.48*2);
+  // Top/bottom endplate caps in primary colour
   c.fillStyle = team.color1;
-  c.fillRect(x + hl + 1, y - hw*1.25, 5, w*1.25*2);
+  c.fillRect(x - hl - 7,  y - hw*1.48, 4, 3);
+  c.fillRect(x - hl - 7,  y + hw*1.48 - 3, 4, 3);
+  // DRS gap (thin dark line through middle of wing)
+  c.fillStyle = 'rgba(0,0,0,0.45)';
+  c.fillRect(x - hl - 6,  y - 1, 9, 2);
 
-  // Wheels — 4 black rubber ellipses with shine highlight
-  const wx1 = x + hl*0.44, wx2 = x - hl*0.44, wy = hw + 1.5;
-  [[wx1,-wy,2.5,3.5],[wx1,wy,2.5,3.5],[wx2,-wy-0.5,3,4.5],[wx2,wy+0.5,3,4.5]]
-    .forEach(([ex,ey,rx,ry]) => {
-      c.fillStyle = '#141414';
+  // ── Front wing ────────────────────────────────────────────
+  c.fillStyle = team.color1;
+  c.fillRect(x + hl + 2,  y - hw*1.3, 6, w*1.3*2);
+  c.fillStyle = team.color2;
+  c.fillRect(x + hl + 7,  y - hw*1.3, 2, 4);
+  c.fillRect(x + hl + 7,  y + hw*1.3 - 4, 2, 4);
+
+  // ── Wheels (tire + metallic rim + hub + shine) ────────────
+  const wx1 = x + hl*0.4, wx2 = x - hl*0.4, wy = hw + 2;
+  [[wx1,-wy,3,4.2],[wx1,wy,3,4.2],[wx2,-wy-0.5,3.8,5.2],[wx2,wy+0.5,3.8,5.2]]
+    .forEach(([ex, ey, rx, ry]) => {
+      c.fillStyle = '#161616';
       c.beginPath(); c.ellipse(ex,ey,rx,ry,0,0,Math.PI*2); c.fill();
-      c.fillStyle = 'rgba(255,255,255,0.12)';
-      c.beginPath(); c.ellipse(ex-rx*0.3,ey-ry*0.3,rx*0.45,ry*0.38,0,0,Math.PI*2); c.fill();
+      c.fillStyle = '#888';
+      c.beginPath(); c.ellipse(ex,ey,rx*0.52,ry*0.48,0,0,Math.PI*2); c.fill();
+      c.fillStyle = '#555';
+      c.beginPath(); c.ellipse(ex,ey,rx*0.22,ry*0.2,0,0,Math.PI*2); c.fill();
+      c.fillStyle = 'rgba(255,255,255,0.18)';
+      c.beginPath(); c.ellipse(ex-rx*0.28,ey-ry*0.28,rx*0.38,ry*0.32,0,0,Math.PI*2); c.fill();
     });
 }
 

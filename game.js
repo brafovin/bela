@@ -23,6 +23,7 @@ let rafId        = null;
 let raceFinished = false;
 let fans = [];
 let fanGroups = {};
+let grandstandSegs = [];
 let stars = [];
 
 const keys = {};
@@ -178,6 +179,7 @@ function buildRace() {
 function buildFans() {
   fans = [];
   fanGroups = {};
+  grandstandSegs = [];
   const wp   = track.waypoints;
   const n    = wp.length;
   const palette = [
@@ -198,17 +200,25 @@ function buildFans() {
     const tx =  dx/len, ty = dy/len;  // along-track
 
     for (const side of [-1, 1]) {
+      // Grandstand backing: thick line running along-track behind this fan cluster
+      const gd = track.width/2 + 14 + 14;  // middle row depth
+      const span = 4 * 4 + 6;
+      grandstandSegs.push({
+        x1: cur.x + nx*side*gd - tx*span, y1: cur.y + ny*side*gd - ty*span,
+        x2: cur.x + nx*side*gd + tx*span, y2: cur.y + ny*side*gd + ty*span,
+      });
+
       for (let row = 0; row < 3; row++) {
-        const d = track.width/2 + 16 + row * 8;
+        const d = track.width/2 + 14 + row * 14;
         for (let s = -4; s <= 4; s++) {
-          const fx = cur.x + nx*side*d + tx*s*3 + (Math.random()-0.5)*2;
-          const fy = cur.y + ny*side*d + ty*s*3 + (Math.random()-0.5)*2;
+          const fx = cur.x + nx*side*d + tx*s*4 + (Math.random()-0.5)*2;
+          const fy = cur.y + ny*side*d + ty*s*4 + (Math.random()-0.5)*2;
           if (fx < 8 || fx > CW-8 || fy < 8 || fy > CH-8) continue;
           fans.push({
             x: fx, y: fy,
             color: palette[Math.floor(Math.random() * palette.length)],
             phase: Math.random() * Math.PI * 2,
-            size: 2.5 + Math.random() * 1.5,
+            size: 3.5 + Math.random() * 1.8,
             hasFlag: Math.random() < 0.28,
           });
         }
@@ -689,42 +699,76 @@ function render() {
 function drawFans() {
   const t = performance.now() / 1000;
 
-  // Pass 1: coloured bodies + flag rectangles (batched by colour, one fillStyle each)
+  // Pass 0: dark grandstand backing structures (one compound path, one stroke)
+  ctx.strokeStyle = 'rgba(10,10,28,0.88)';
+  ctx.lineWidth   = 32;
+  ctx.lineCap     = 'round';
+  ctx.beginPath();
+  grandstandSegs.forEach(seg => {
+    ctx.moveTo(seg.x1, seg.y1);
+    ctx.lineTo(seg.x2, seg.y2);
+  });
+  ctx.stroke();
+
+  // Pass 1: coloured bodies + flag rectangles (batched by colour, compound path)
   for (const [color, group] of Object.entries(fanGroups)) {
     ctx.fillStyle = color;
+    ctx.beginPath();
     group.forEach(f => {
-      const bw = f.size * 1.6, bh = f.size * 2.4;
-      const yo = Math.sin(f.phase + t * 3.5) * 1.6;
-      // Body rectangle
-      ctx.fillRect(f.x - bw*0.5, f.y - bh*0.5 + yo, bw, bh);
-      // Flag (coloured rectangle above fan's head)
+      const bw = f.size * 1.4, bh = f.size * 2.2;
+      const yo = Math.sin(f.phase + t * 3.5) * 1.4;
+      ctx.rect(f.x - bw*0.5, f.y - bh*0.5 + yo, bw, bh);
       if (f.hasFlag) {
-        ctx.fillRect(f.x + bw*0.5, f.y - bh*1.5 + yo*1.6, bw*2, bh*0.65);
+        ctx.rect(f.x + bw*0.5, f.y - bh*1.5 + yo*1.6, bw*2, bh*0.65);
       }
     });
+    ctx.fill();
   }
 
-  // Pass 2: flag sticks (all combined into one canvas path, single stroke)
-  ctx.strokeStyle = 'rgba(200,200,200,0.55)';
-  ctx.lineWidth = 0.8;
+  // Pass 2: flag sticks (single compound path, one stroke)
+  ctx.strokeStyle = 'rgba(210,210,210,0.6)';
+  ctx.lineWidth   = 0.9;
+  ctx.lineCap     = 'round';
   ctx.beginPath();
   fans.forEach(f => {
     if (!f.hasFlag) return;
-    const bw = f.size * 1.6, bh = f.size * 2.4;
-    const yo = Math.sin(f.phase + t * 3.5) * 1.6;
+    const bw = f.size * 1.4, bh = f.size * 2.2;
+    const yo = Math.sin(f.phase + t * 3.5) * 1.4;
     const sx = f.x + bw * 0.5;
     ctx.moveTo(sx, f.y - bh*0.5 + yo);
     ctx.lineTo(sx, f.y - bh*1.5 + yo*1.6);
   });
   ctx.stroke();
 
-  // Pass 3: skin-tone heads (single fillStyle change, one fillRect per fan)
-  ctx.fillStyle = '#e0b882';
-  fans.forEach(f => {
-    const hs = f.size * 0.9;
-    const yo = Math.sin(f.phase + t * 3.5) * 1.6;
-    ctx.fillRect(f.x - hs, f.y - f.size*2.4 + yo, hs*2, hs*2);
+  // Pass 3: waving arms for every 3rd fan (compound path, skin tone)
+  ctx.strokeStyle = '#c4905a';
+  ctx.lineWidth   = 1.4;
+  ctx.lineCap     = 'round';
+  ctx.beginPath();
+  fans.forEach((f, idx) => {
+    if (idx % 3 !== 0) return;
+    const bw = f.size * 1.4, bh = f.size * 2.2;
+    const yo  = Math.sin(f.phase + t * 3.5) * 1.4;
+    const arm = Math.sin(f.phase + t * 4.5) * 2.2;
+    const midY = f.y + yo;
+    ctx.moveTo(f.x - bw*0.5, midY);
+    ctx.lineTo(f.x - bw - 1, midY - bh*0.28 + arm);
+    ctx.moveTo(f.x + bw*0.5, midY);
+    ctx.lineTo(f.x + bw + 1, midY - bh*0.28 - arm);
   });
+  ctx.stroke();
+
+  // Pass 4: round heads (skin tone, arc per fan batched in one compound path)
+  ctx.fillStyle = '#d4a060';
+  ctx.beginPath();
+  fans.forEach(f => {
+    const hr   = f.size * 0.82;
+    const yo   = Math.sin(f.phase + t * 3.5) * 1.4;
+    const headY = f.y - f.size * 2.2 * 0.5 - hr + yo;
+    ctx.moveTo(f.x + hr, headY);
+    ctx.arc(f.x, headY, hr, 0, Math.PI * 2);
+  });
+  ctx.fill();
 }
 
 function drawTrack() {
@@ -860,29 +904,47 @@ function drawCars() {
 
     // Player glow ring + bouncing arrow indicator
     if (car.isPlayer) {
-      // Glow ring
+      const pulse = 0.72 + Math.sin(performance.now() / 320) * 0.1;
+
+      // Outer white halo
       ctx.save();
-      ctx.shadowBlur  = 22;
-      ctx.shadowColor = '#e10600';
-      ctx.strokeStyle = 'rgba(255,60,40,0.9)';
-      ctx.lineWidth   = 2.2;
+      ctx.shadowBlur  = 30;
+      ctx.shadowColor = '#ffffff';
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth   = 3.5;
       ctx.beginPath();
-      ctx.ellipse(car.x, car.y, CAR_L*0.72, CAR_W*1.22, car.angle, 0, Math.PI*2);
+      ctx.ellipse(car.x, car.y, CAR_L*0.82*pulse, CAR_W*1.45*pulse, car.angle, 0, Math.PI*2);
       ctx.stroke();
       ctx.restore();
 
-      // Bouncing red arrow above car
-      const bounce = Math.sin(performance.now() / 280) * 3;
-      const arrowY = car.y - CAR_W*1.6 - 10 + bounce;
+      // Inner red glow ring
       ctx.save();
-      ctx.fillStyle = '#e10600';
-      ctx.shadowBlur  = 8;
-      ctx.shadowColor = '#ff4422';
+      ctx.shadowBlur  = 26;
+      ctx.shadowColor = '#e10600';
+      ctx.strokeStyle = 'rgba(255,50,30,0.95)';
+      ctx.lineWidth   = 2.8;
       ctx.beginPath();
-      ctx.moveTo(car.x - 6, arrowY - 8);
-      ctx.lineTo(car.x + 6, arrowY - 8);
+      ctx.ellipse(car.x, car.y, CAR_L*0.66, CAR_W*1.15, car.angle, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+
+      // Bouncing arrow above car
+      const bounce = Math.sin(performance.now() / 260) * 4;
+      const arrowY = car.y - CAR_W*2.0 - 10 + bounce;
+      ctx.save();
+      ctx.shadowBlur  = 14;
+      ctx.shadowColor = '#ff6644';
+      // White outline
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth   = 2;
+      ctx.beginPath();
+      ctx.moveTo(car.x - 8, arrowY - 12);
+      ctx.lineTo(car.x + 8, arrowY - 12);
       ctx.lineTo(car.x,     arrowY);
       ctx.closePath();
+      ctx.stroke();
+      // Red fill
+      ctx.fillStyle = '#e10600';
       ctx.fill();
       ctx.restore();
     }

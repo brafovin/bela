@@ -1064,12 +1064,12 @@ function drawCarShape(c, team, x, y, l, w) {
 // ── TRAINER (Race Engineer) ──────────────────────────────────
 
 function trainerSay(msg, duration, face = 'neutral', force = false) {
-  if (!force && trainer.cooldown > 0 && trainer.timer > 0.5) return;
+  if (!force && trainer.cooldown > 0) return;
   trainer.message   = msg;
   trainer.timer     = duration;
   trainer.totalTime = duration;
   trainer.face      = face;
-  trainer.cooldown  = duration + (force ? 4 : 8);
+  trainer.cooldown  = duration + (force ? 18 : 25);
 }
 
 function updateTrainer(dt) {
@@ -1080,85 +1080,69 @@ function updateTrainer(dt) {
   const pos = getPlayerPos();
   const lap = playerCar.laps + 1;
 
-  // Begrüßung zu Rennstart (einmalig)
+  // Einmalig: Rennstart
   if (!trainer.startMsgSent) {
     trainer.startMsgSent = true;
     trainer.lastPos = pos;
     trainer.lastLap = lap;
-    trainerSay('Los geht\'s! Viel Erfolg im Rennen!', 5, 'excited', true);
+    trainerSay('Viel Erfolg da draußen, Pilot!', 4, 'excited', true);
     return;
   }
 
-  // Letzte Runde (einmalig)
+  // Einmalig: Letzte Runde
   if (lap === NUM_LAPS && trainer.lastLap < NUM_LAPS) {
     trainer.lastLap = NUM_LAPS;
-    trainerSay('LETZTE RUNDE! Alles geben jetzt!', 5, 'excited', true);
+    trainerSay('Letzte Runde — alles raus jetzt!', 4, 'excited', true);
     return;
   }
+  trainer.lastLap = lap;
 
-  // Neue Runde
-  if (lap > trainer.lastLap) {
-    trainer.lastLap = lap;
-    trainerSay(`Runde ${lap} von ${NUM_LAPS}! Fokus bleiben!`, 4, 'neutral', true);
-    return;
-  }
-
-  // Überholmöglichkeit — Fahrer direkt vor uns
-  if (pos > 1 && trainer.cooldown <= 0) {
-    const sorted = getPositions();
-    const pidx = sorted.findIndex(c => c.isPlayer);
-    if (pidx > 0) {
-      const ahead = sorted[pidx - 1];
-      if (Math.hypot(ahead.x - playerCar.x, ahead.y - playerCar.y) < 42) {
-        trainerSay('Er ist direkt vor dir! Jetzt überholen!', 4, 'excited', true);
-        return;
-      }
-    }
-  }
-
-  // Positionswechsel
+  // Positionswechsel (nur einmal pro Wechsel)
   if (trainer.lastPos !== -1 && pos !== trainer.lastPos) {
-    if (pos < trainer.lastPos) {
-      trainerSay(`P${pos}! Gut überholt! Weiter so!`, 4, 'happy', true);
-    } else {
-      trainerSay('Er hat uns überholt! Gegenangriff!', 4, 'worried', true);
-    }
+    const gained = pos < trainer.lastPos;
     trainer.lastPos = pos;
+    const gainMsgs = [`P${pos} — sauber gemacht!`, 'Schönes Überholmanöver!', `P${pos} — weiter so!`];
+    const loseMsgs = ['Nicht einschlafen! Antworten!', 'Der zieht ab — hinterher!', 'Fokus! Wir verlieren einen Platz!'];
+    const list = gained ? gainMsgs : loseMsgs;
+    trainerSay(list[Math.floor(Math.random() * list.length)], 4, gained ? 'happy' : 'worried', true);
     return;
   }
   trainer.lastPos = pos;
 
-  // Regelmäßige Tipps (nur wenn Cooldown abgelaufen)
+  // Regelmäßige Tipps — langer Cooldown, viel Abwechslung
   if (trainer.cooldown > 0) return;
 
-  const pool = [];
-  if (!playerCar.finished && playerCar.speed < 22) {
-    pool.push(['Mehr Gas! Du bist viel zu langsam!', 'worried']);
-    pool.push(['Vollgas! Keine Zeit verlieren!', 'worried']);
-  }
-  if (pos === 1) {
-    pool.push(['Ausgezeichnet! Du führst das Rennen!', 'happy']);
-    pool.push(['Halte den Vorsprung, sauber durch die Kurven!', 'happy']);
-  } else if (pos <= 3) {
-    pool.push([`P${pos} – du bist auf dem Podium! Drück weiter!`, 'happy']);
-    pool.push(['Der Fahrer vor dir ist in Reichweite!', 'excited']);
-  } else if (pos <= 6) {
-    pool.push([`P${pos} – bleib am Ball, Punkte sind in Griffweite!`, 'neutral']);
-    pool.push(['Bremse später in den Kurven für mehr Tempo!', 'neutral']);
-  } else if (pos <= 10) {
-    pool.push([`P${pos} – du kannst mehr! Sei aggressiver!`, 'worried']);
-    pool.push(['Such dir eine Lücke und greif an!', 'neutral']);
-  } else {
-    pool.push([`P${pos} – Aufholjagd! Volles Risiko jetzt!`, 'worried']);
-    pool.push(['Sei mutiger in den Kurven!', 'worried']);
-  }
-  pool.push(['Nutze den Windschatten der Fahrer vor dir!', 'neutral']);
-  pool.push(['Ideallinie fahren gibt dir mehr Geschwindigkeit!', 'neutral']);
-  pool.push(['Bremspunkt anvisieren, dann voll raus aus der Kurve!', 'neutral']);
-  pool.push(['Bleib auf der Strecke, vermeide das Gras!', 'neutral']);
+  const pool = [
+    // Fahrtipps
+    ['Spät bremsen, früh beschleunigen.', 'neutral'],
+    ['Bleib auf der Linie — da ist der Grip.', 'neutral'],
+    ['Windschatten nutzen, dann rausziehen.', 'neutral'],
+    ['Vertrau dem Auto, es hat mehr drauf.', 'neutral'],
+    ['Ruhige Hände — das spart Zeit.', 'neutral'],
+    // Positions-abhängig
+    ...(pos === 1 ? [
+      ['Du führst. Kein Fehler jetzt.', 'happy'],
+      ['Sauber und konzentriert — genau so.', 'happy'],
+    ] : pos <= 3 ? [
+      ['Podium in Sicht — nicht nachlassen!', 'happy'],
+      [`Der vor dir ist lösbar. P${pos - 1} wartet.`, 'excited'],
+    ] : pos <= 8 ? [
+      ['Lücke suchen und zustechen.', 'neutral'],
+      ['Du hast das Tempo — zeig es.', 'neutral'],
+    ] : [
+      ['Mutiger in die Kurven rein.', 'worried'],
+      ['Wir brauchen Überholmanöver — jetzt.', 'worried'],
+    ]),
+    // Sonstige / Humor
+    ['Radio check — hörst du mich? Gas geben.', 'neutral'],
+    ['Ich glaube an dich, Pilot.', 'happy'],
+    ['Die Strecke gehört dir heute.', 'happy'],
+    ['Reifen ok, Tempo ok — push push push.', 'excited'],
+    ['Kein Risiko in der Kurve — danach voll raus.', 'neutral'],
+  ];
 
   const [msg, face] = pool[Math.floor(Math.random() * pool.length)];
-  trainerSay(msg, 5, face);
+  trainerSay(msg, 4, face);
 }
 
 function wrapText(text, maxW) {

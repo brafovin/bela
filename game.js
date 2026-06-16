@@ -244,10 +244,17 @@ function updatePlayer(car, dt) {
 function advanceWaypoint(car) {
   const wp = track.waypoints;
   const n  = track.numWP;
-  for (let i = 0; i < 10; i++) {
-    const t = wp[car.wpIdx];
-    if (Math.hypot(car.x - t.x, car.y - t.y) < 45) {
-      car.wpIdx = (car.wpIdx + 1) % n;
+  // Advance past any waypoint the car has physically passed, using the
+  // track tangent as the reference direction (dot-product sign test).
+  for (let i = 0; i < 20; i++) {
+    const cur  = car.wpIdx % n;
+    const next = (cur + 1) % n;
+    const tx = wp[next].x - wp[cur].x;   // tangent at current WP
+    const ty = wp[next].y - wp[cur].y;
+    const cx = car.x - wp[cur].x;        // car relative to WP
+    const cy = car.y - wp[cur].y;
+    if (cx * tx + cy * ty > 0) {         // car is ahead of this WP
+      car.wpIdx = next;
     } else break;
   }
 }

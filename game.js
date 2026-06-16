@@ -180,54 +180,52 @@ function buildFans() {
   fans = [];
   fanGroups = {};
   grandstandSegs = [];
-  const wp   = track.waypoints;
-  const n    = wp.length;
+  const wp = track.waypoints;
+  const n  = wp.length;
   const palette = [
-    '#00e5ff','#00e5ff',   // cyan
-    '#bb44ff','#9900dd',   // purple
-    '#ffffff','#ddeeff',   // white / pale blue
-    '#ffcc00','#ff9900',   // gold / amber
-    '#ff44aa','#4488ff',   // pink / blue
+    '#ff3333', '#ff7700', '#ffdd00',
+    '#33cc44', '#2299ff', '#cc33ff',
+    '#ff44aa', '#ffffff',
   ];
 
   for (let i = 0; i < n; i += 6) {
-    const cur  = wp[i];
-    const fwd  = wp[(i + 3) % n];
-    const dx   = fwd.x - cur.x, dy = fwd.y - cur.y;
-    const len  = Math.hypot(dx, dy);
+    const cur = wp[i];
+    const fwd = wp[(i + 3) % n];
+    const dx = fwd.x - cur.x, dy = fwd.y - cur.y;
+    const len = Math.hypot(dx, dy);
     if (len < 0.001) continue;
-    const nx = -dy/len, ny = dx/len;  // perpendicular
+    const nx = -dy/len, ny = dx/len;  // perpendicular to track
     const tx =  dx/len, ty = dy/len;  // along-track
 
     for (const side of [-1, 1]) {
-      // Grandstand backing: thick line running along-track behind this fan cluster
-      const gd = track.width/2 + 14 + 14;  // middle row depth
-      const span = 4 * 4 + 6;
-      grandstandSegs.push({
-        x1: cur.x + nx*side*gd - tx*span, y1: cur.y + ny*side*gd - ty*span,
-        x2: cur.x + nx*side*gd + tx*span, y2: cur.y + ny*side*gd + ty*span,
-      });
-
       for (let row = 0; row < 3; row++) {
-        const d = track.width/2 + 14 + row * 14;
+        const d    = track.width/2 + 18 + row * 18;
+        const span = 24;  // half-length of this grandstand segment
+        // One backing segment per row so we can draw rows separately (layered effect)
+        grandstandSegs.push({
+          x1: cur.x + nx*side*d - tx*span, y1: cur.y + ny*side*d - ty*span,
+          x2: cur.x + nx*side*d + tx*span, y2: cur.y + ny*side*d + ty*span,
+          row,
+        });
+
         for (let s = -4; s <= 4; s++) {
-          const fx = cur.x + nx*side*d + tx*s*4 + (Math.random()-0.5)*2;
-          const fy = cur.y + ny*side*d + ty*s*4 + (Math.random()-0.5)*2;
+          const fx = cur.x + nx*side*d + tx*s*5 + (Math.random()-0.5)*1.5;
+          const fy = cur.y + ny*side*d + ty*s*5 + (Math.random()-0.5)*1.5;
           if (fx < 8 || fx > CW-8 || fy < 8 || fy > CH-8) continue;
           fans.push({
             x: fx, y: fy,
             color: palette[Math.floor(Math.random() * palette.length)],
             phase: Math.random() * Math.PI * 2,
-            size: 3.5 + Math.random() * 1.8,
-            hasFlag: Math.random() < 0.28,
+            hasFlag: Math.random() < 0.25,
           });
         }
       }
     }
   }
 
-  // Pre-group by colour so drawFans only changes fillStyle once per colour
-  fans.forEach(f => {
+  // Store index on each fan for O(1) lookup in the anim[] array inside drawFans
+  fans.forEach((f, idx) => {
+    f._idx = idx;
     if (!fanGroups[f.color]) fanGroups[f.color] = [];
     fanGroups[f.color].push(f);
   });
@@ -698,77 +696,94 @@ function render() {
 
 function drawFans() {
   const t = performance.now() / 1000;
+  const HEAD_R = 3, BODY_H = 6, ARM_L = 5, LEG_L = 3.5;
 
-  // Pass 0: dark grandstand backing structures (one compound path, one stroke)
-  ctx.strokeStyle = 'rgba(10,10,28,0.88)';
-  ctx.lineWidth   = 32;
+  // Pass 0: Grandstand concrete rows — draw back-row first so front rows overlap on top
+  for (let row = 2; row >= 0; row--) {
+    const v = 18 + row * 10;
+    ctx.strokeStyle = `rgba(${v},${v},${v + 20},0.96)`;
+    ctx.lineWidth   = 16;
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    grandstandSegs.forEach(seg => {
+      if (seg.row !== row) return;
+      ctx.moveTo(seg.x1, seg.y1);
+      ctx.lineTo(seg.x2, seg.y2);
+    });
+    ctx.stroke();
+  }
+
+  // Pre-compute per-fan animation values (parallel array, same index as fans[])
+  const anim = fans.map(f => {
+    const yo  = Math.sin(f.phase + t * 3.2) * 0.8;
+    const arm = Math.sin(f.phase + t * 4.5) * 3.0;
+    const headY = f.y - BODY_H - HEAD_R + yo;
+    const bty   = headY + HEAD_R;   // top of body line
+    const bby   = bty + BODY_H;     // bottom of body = seat level
+    return { yo, arm, headY, bty, bby };
+  });
+
+  // Pass 1: Stickman skeleton — body + 2 raised arms + 2 sitting legs (one compound path)
+  ctx.strokeStyle = '#18181e';
+  ctx.lineWidth   = 1;
   ctx.lineCap     = 'round';
   ctx.beginPath();
-  grandstandSegs.forEach(seg => {
-    ctx.moveTo(seg.x1, seg.y1);
-    ctx.lineTo(seg.x2, seg.y2);
+  fans.forEach((f, i) => {
+    const { bty, bby, arm } = anim[i];
+    ctx.moveTo(f.x, bty);  ctx.lineTo(f.x, bby);                              // body
+    ctx.moveTo(f.x, bty + 2);  ctx.lineTo(f.x - ARM_L, bty - 2 + arm);       // left arm up
+    ctx.moveTo(f.x, bty + 2);  ctx.lineTo(f.x + ARM_L, bty - 2 - arm);       // right arm up
+    ctx.moveTo(f.x, bby);  ctx.lineTo(f.x - 2.5, bby + LEG_L);               // left leg
+    ctx.moveTo(f.x, bby);  ctx.lineTo(f.x + 2.5, bby + LEG_L);               // right leg
   });
   ctx.stroke();
 
-  // Pass 1: coloured bodies + flag rectangles (batched by colour, compound path)
+  // Pass 2: Colored shirt rectangles (batched per color)
   for (const [color, group] of Object.entries(fanGroups)) {
     ctx.fillStyle = color;
     ctx.beginPath();
     group.forEach(f => {
-      const bw = f.size * 1.4, bh = f.size * 2.2;
-      const yo = Math.sin(f.phase + t * 3.5) * 1.4;
-      ctx.rect(f.x - bw*0.5, f.y - bh*0.5 + yo, bw, bh);
-      if (f.hasFlag) {
-        ctx.rect(f.x + bw*0.5, f.y - bh*1.5 + yo*1.6, bw*2, bh*0.65);
-      }
+      const { bty } = anim[f._idx];
+      ctx.rect(f.x - 2.2, bty + 1.5, 4.4, 4);
     });
     ctx.fill();
   }
 
-  // Pass 2: flag sticks (single compound path, one stroke)
-  ctx.strokeStyle = 'rgba(210,210,210,0.6)';
+  // Pass 3: Heads — round skin-tone circles (arc compound path, one fill call)
+  ctx.fillStyle = '#d4a060';
+  ctx.beginPath();
+  fans.forEach((f, i) => {
+    const { headY } = anim[i];
+    ctx.moveTo(f.x + HEAD_R, headY);
+    ctx.arc(f.x, headY, HEAD_R, 0, Math.PI * 2);
+  });
+  ctx.fill();
+
+  // Pass 4: Flag sticks (one compound path)
+  ctx.strokeStyle = 'rgba(215,215,215,0.72)';
   ctx.lineWidth   = 0.9;
   ctx.lineCap     = 'round';
   ctx.beginPath();
-  fans.forEach(f => {
+  fans.forEach((f, i) => {
     if (!f.hasFlag) return;
-    const bw = f.size * 1.4, bh = f.size * 2.2;
-    const yo = Math.sin(f.phase + t * 3.5) * 1.4;
-    const sx = f.x + bw * 0.5;
-    ctx.moveTo(sx, f.y - bh*0.5 + yo);
-    ctx.lineTo(sx, f.y - bh*1.5 + yo*1.6);
+    const { headY, bty } = anim[i];
+    ctx.moveTo(f.x + ARM_L, bty + 2);
+    ctx.lineTo(f.x + ARM_L, headY - 8);
   });
   ctx.stroke();
 
-  // Pass 3: waving arms for every 3rd fan (compound path, skin tone)
-  ctx.strokeStyle = '#c4905a';
-  ctx.lineWidth   = 1.4;
-  ctx.lineCap     = 'round';
-  ctx.beginPath();
-  fans.forEach((f, idx) => {
-    if (idx % 3 !== 0) return;
-    const bw = f.size * 1.4, bh = f.size * 2.2;
-    const yo  = Math.sin(f.phase + t * 3.5) * 1.4;
-    const arm = Math.sin(f.phase + t * 4.5) * 2.2;
-    const midY = f.y + yo;
-    ctx.moveTo(f.x - bw*0.5, midY);
-    ctx.lineTo(f.x - bw - 1, midY - bh*0.28 + arm);
-    ctx.moveTo(f.x + bw*0.5, midY);
-    ctx.lineTo(f.x + bw + 1, midY - bh*0.28 - arm);
-  });
-  ctx.stroke();
-
-  // Pass 4: round heads (skin tone, arc per fan batched in one compound path)
-  ctx.fillStyle = '#d4a060';
-  ctx.beginPath();
-  fans.forEach(f => {
-    const hr   = f.size * 0.82;
-    const yo   = Math.sin(f.phase + t * 3.5) * 1.4;
-    const headY = f.y - f.size * 2.2 * 0.5 - hr + yo;
-    ctx.moveTo(f.x + hr, headY);
-    ctx.arc(f.x, headY, hr, 0, Math.PI * 2);
-  });
-  ctx.fill();
+  // Pass 5: Flag cloth (batched per color)
+  for (const [color, group] of Object.entries(fanGroups)) {
+    const withFlag = group.filter(f => f.hasFlag);
+    if (!withFlag.length) continue;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    withFlag.forEach(f => {
+      const { headY } = anim[f._idx];
+      ctx.rect(f.x + ARM_L, headY - 8, 8, 5);
+    });
+    ctx.fill();
+  }
 }
 
 function drawTrack() {

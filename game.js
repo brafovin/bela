@@ -198,8 +198,8 @@ function buildFans() {
     const tx =  dx/len, ty = dy/len;  // along-track
 
     for (const side of [-1, 1]) {
-      for (let row = 0; row < 4; row++) {
-        const d = track.width/2 + 14 + row * 5.5;
+      for (let row = 0; row < 3; row++) {
+        const d = track.width/2 + 16 + row * 8;
         for (let s = -4; s <= 4; s++) {
           const fx = cur.x + nx*side*d + tx*s*3 + (Math.random()-0.5)*2;
           const fy = cur.y + ny*side*d + ty*s*3 + (Math.random()-0.5)*2;
@@ -208,7 +208,8 @@ function buildFans() {
             x: fx, y: fy,
             color: palette[Math.floor(Math.random() * palette.length)],
             phase: Math.random() * Math.PI * 2,
-            size: 1.7 + Math.random() * 1.3,
+            size: 2.5 + Math.random() * 1.5,
+            hasFlag: Math.random() < 0.28,
           });
         }
       }
@@ -686,15 +687,44 @@ function render() {
 }
 
 function drawFans() {
-  const t = raceTime || 0;
+  const t = performance.now() / 1000;
+
+  // Pass 1: coloured bodies + flag rectangles (batched by colour, one fillStyle each)
   for (const [color, group] of Object.entries(fanGroups)) {
     ctx.fillStyle = color;
     group.forEach(f => {
-      const wave = Math.sin(f.phase + t * 3.5) * 1.4;
-      const s = f.size;
-      ctx.fillRect(f.x - s, f.y - s + wave, s * 2, s * 2);
+      const bw = f.size * 1.6, bh = f.size * 2.4;
+      const yo = Math.sin(f.phase + t * 3.5) * 1.6;
+      // Body rectangle
+      ctx.fillRect(f.x - bw*0.5, f.y - bh*0.5 + yo, bw, bh);
+      // Flag (coloured rectangle above fan's head)
+      if (f.hasFlag) {
+        ctx.fillRect(f.x + bw*0.5, f.y - bh*1.5 + yo*1.6, bw*2, bh*0.65);
+      }
     });
   }
+
+  // Pass 2: flag sticks (all combined into one canvas path, single stroke)
+  ctx.strokeStyle = 'rgba(200,200,200,0.55)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  fans.forEach(f => {
+    if (!f.hasFlag) return;
+    const bw = f.size * 1.6, bh = f.size * 2.4;
+    const yo = Math.sin(f.phase + t * 3.5) * 1.6;
+    const sx = f.x + bw * 0.5;
+    ctx.moveTo(sx, f.y - bh*0.5 + yo);
+    ctx.lineTo(sx, f.y - bh*1.5 + yo*1.6);
+  });
+  ctx.stroke();
+
+  // Pass 3: skin-tone heads (single fillStyle change, one fillRect per fan)
+  ctx.fillStyle = '#e0b882';
+  fans.forEach(f => {
+    const hs = f.size * 0.9;
+    const yo = Math.sin(f.phase + t * 3.5) * 1.6;
+    ctx.fillRect(f.x - hs, f.y - f.size*2.4 + yo, hs*2, hs*2);
+  });
 }
 
 function drawTrack() {
@@ -828,16 +858,32 @@ function drawCars() {
     ctx.fillText(car.driver.num, 0, 0);
     ctx.restore();
 
-    // Player glow ring
+    // Player glow ring + bouncing arrow indicator
     if (car.isPlayer) {
+      // Glow ring
       ctx.save();
-      ctx.shadowBlur  = 18;
-      ctx.shadowColor = '#ffffff';
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-      ctx.lineWidth   = 1.5;
+      ctx.shadowBlur  = 22;
+      ctx.shadowColor = '#e10600';
+      ctx.strokeStyle = 'rgba(255,60,40,0.9)';
+      ctx.lineWidth   = 2.2;
       ctx.beginPath();
-      ctx.ellipse(car.x, car.y, CAR_L*0.7, CAR_W*1.18, car.angle, 0, Math.PI*2);
+      ctx.ellipse(car.x, car.y, CAR_L*0.72, CAR_W*1.22, car.angle, 0, Math.PI*2);
       ctx.stroke();
+      ctx.restore();
+
+      // Bouncing red arrow above car
+      const bounce = Math.sin(performance.now() / 280) * 3;
+      const arrowY = car.y - CAR_W*1.6 - 10 + bounce;
+      ctx.save();
+      ctx.fillStyle = '#e10600';
+      ctx.shadowBlur  = 8;
+      ctx.shadowColor = '#ff4422';
+      ctx.beginPath();
+      ctx.moveTo(car.x - 6, arrowY - 8);
+      ctx.lineTo(car.x + 6, arrowY - 8);
+      ctx.lineTo(car.x,     arrowY);
+      ctx.closePath();
+      ctx.fill();
       ctx.restore();
     }
   });

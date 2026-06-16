@@ -141,6 +141,7 @@ function buildRace() {
       laps: 0,
       wpIdx: 0,        // current target waypoint
       cpPassed: [],    // checkpoints passed this lap
+      lapCooldown: 0,
       finished: false,
       finishTime: 0,
       lapTime: 0, bestLap: Infinity,
@@ -212,7 +213,8 @@ function update(dt) {
   cars.forEach(car => {
     if (car.finished) return;
     car.lapTime += dt;
-    if (car.isPlayer) updatePlayer(car, dt);
+    if (car.lapCooldown > 0) car.lapCooldown -= dt;
+    if (car.isPlayer) { updatePlayer(car, dt); advanceWaypoint(car); }
     else              updateAI(car, dt);
     applyPhysics(car, dt);
     checkWaypoints(car);
@@ -236,6 +238,18 @@ function updatePlayer(car, dt) {
   car.speed += (throttle * accel) - (brake * brkF);
   car.speed  = Math.max(0, Math.min(car.maxSpeed, car.speed));
   car.angle += (steerR - steerL) * steer;
+}
+
+// ── PLAYER WAYPOINT TRACKING ─────────────────────────────────
+function advanceWaypoint(car) {
+  const wp = track.waypoints;
+  const n  = track.numWP;
+  for (let i = 0; i < 10; i++) {
+    const t = wp[car.wpIdx];
+    if (Math.hypot(car.x - t.x, car.y - t.y) < 45) {
+      car.wpIdx = (car.wpIdx + 1) % n;
+    } else break;
+  }
 }
 
 // ── AI PHYSICS ───────────────────────────────────────────────
@@ -315,11 +329,12 @@ function checkWaypoints(car) {
 
   // Check lap completion (near waypoint 0 = start/finish)
   const d0 = Math.hypot(car.x - wp[0].x, car.y - wp[0].y);
-  if (d0 < track.width && car.cpPassed.length >= Math.floor(cps.length * 0.7) && car.wpIdx > n * 0.3) {
+  if (d0 < track.width && car.cpPassed.length >= Math.floor(cps.length * 0.6) && car.lapCooldown <= 0) {
     car.laps++;
     if (car.lapTime < car.bestLap) car.bestLap = car.lapTime;
-    car.lapTime  = 0;
-    car.cpPassed = [];
+    car.lapTime    = 0;
+    car.cpPassed   = [];
+    car.lapCooldown = 5;
 
     if (car.laps >= NUM_LAPS) {
       car.finished   = true;

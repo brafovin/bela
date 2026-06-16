@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚽ Fußball Spiel</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===== SELECTION SCREEN ===== -->
+  <div id="selection-screen">
+    <div class="selection-header">
+      <h1>⚽ FUSSBALL</h1>
+      <p>Wähle deinen Verein und tritt gegen den Computer an</p>
+    </div>
+    <div id="teams-grid"></div>
+    <div id="selected-info" class="hidden">
+      <p>Ausgewählt: <strong id="selected-name"></strong></p>
+      <button id="start-btn" class="btn-primary">🎮 &nbsp; Spiel starten</button>
+    </div>
+  </div>
+
+  <!-- ===== GAME SCREEN ===== -->
+  <div id="game-screen" class="hidden">
+    <div id="scoreboard">
+      <div class="score-team">
+        <span class="team-badge-hud" id="player-badge">YOU</span>
+        <span class="team-name-hud" id="player-team-name">Team</span>
+        <span class="score-num" id="player-score">0</span>
+      </div>
+      <div class="scoreboard-center">
+        <div class="timer-display" id="timer">5:00</div>
+        <div class="period-label">Spielzeit</div>
+      </div>
+      <div class="score-team right">
+        <span class="score-num" id="cpu-score">0</span>
+        <span class="team-name-hud" id="cpu-team-name">CPU</span>
+        <span class="team-badge-hud" id="cpu-badge">CPU</span>
+      </div>
+    </div>
+
+    <div id="canvas-wrapper">
+      <canvas id="game-canvas"></canvas>
+      <div id="goal-banner"></div>
+    </div>
+
+    <div id="controls-bar">
+      <div class="control-hint">
+        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> oder
+        <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd>
+        Bewegen
+      </div>
+      <div class="control-hint">
+        <kbd>Space</kbd> Schuss aufs Tor
+      </div>
+      <div class="control-hint">
+        <kbd>Esc</kbd> Pause
+      </div>
+      <button id="pause-btn" class="btn-secondary">⏸ Pause</button>
+    </div>
+  </div>
+
+  <!-- ===== PAUSE SCREEN ===== -->
+  <div id="pause-screen" class="overlay-screen hidden">
+    <div class="overlay-box">
+      <h2 style="color:#f0c040">⏸ Pause</h2>
+      <div class="overlay-buttons">
+        <button id="resume-btn" class="btn-primary">▶ &nbsp;Weiter</button>
+        <button onclick="location.reload()" class="btn-secondary">🏠 &nbsp;Menü</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== GAMEOVER SCREEN ===== -->
+  <div id="gameover-screen" class="overlay-screen hidden">
+    <div class="overlay-box">
+      <h2 id="result-title">Spiel beendet</h2>
+      <div class="final-score">
+        <span id="final-player-score">0</span>
+        <span class="separator">:</span>
+        <span id="final-cpu-score">0</span>
+      </div>
+      <p class="result-subtitle" id="result-text"></p>
+      <div class="overlay-buttons">
+        <button onclick="location.reload()" class="btn-primary">🏠 &nbsp;Menü</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="teams.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

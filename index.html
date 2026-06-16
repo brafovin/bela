@@ -3,92 +3,95 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>⚽ Fußball Spiel</title>
+  <title>🏎️ F1 Rennspiel</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- ===== SELECTION SCREEN ===== -->
-  <div id="selection-screen">
-    <div class="selection-header">
-      <h1>⚽ FUSSBALL</h1>
-      <p>Wähle deinen Verein und tritt gegen den Computer an</p>
+  <!-- TEAM SELECT -->
+  <div id="screen-team">
+    <div class="screen-header">
+      <h1>🏎️ FORMEL 1</h1>
+      <p>Wähle dein Team</p>
     </div>
-    <div id="teams-grid"></div>
-    <div id="selected-info" class="hidden">
-      <p>Ausgewählt: <strong id="selected-name"></strong></p>
-      <button id="start-btn" class="btn-primary">🎮 &nbsp; Spiel starten</button>
-    </div>
+    <div id="team-grid"></div>
   </div>
 
-  <!-- ===== GAME SCREEN ===== -->
-  <div id="game-screen" class="hidden">
-    <div id="scoreboard">
-      <div class="score-team">
-        <span class="team-badge-hud" id="player-badge">YOU</span>
-        <span class="team-name-hud" id="player-team-name">Team</span>
-        <span class="score-num" id="player-score">0</span>
+  <!-- DRIVER SELECT -->
+  <div id="screen-driver" class="hidden">
+    <div class="screen-header">
+      <h1 id="driver-team-title">Team</h1>
+      <p>Wähle deinen Fahrer</p>
+    </div>
+    <div id="driver-cards"></div>
+    <button class="btn-back" onclick="showTeamSelect()">← Zurück</button>
+  </div>
+
+  <!-- RACE -->
+  <div id="screen-race" class="hidden">
+    <div id="race-hud">
+      <div class="hud-left">
+        <div class="hud-pos" id="hud-pos">P1</div>
+        <div class="hud-lap" id="hud-lap">Runde 1 / 5</div>
       </div>
-      <div class="scoreboard-center">
-        <div class="timer-display" id="timer">5:00</div>
-        <div class="period-label">Spielzeit</div>
+      <div class="hud-center">
+        <div class="hud-track" id="hud-track">–</div>
+        <div class="hud-timer" id="hud-timer">0:00.000</div>
       </div>
-      <div class="score-team right">
-        <span class="score-num" id="cpu-score">0</span>
-        <span class="team-name-hud" id="cpu-team-name">CPU</span>
-        <span class="team-badge-hud" id="cpu-badge">CPU</span>
+      <div class="hud-right">
+        <div class="hud-speed" id="hud-speed">0 km/h</div>
+        <div class="hud-driver" id="hud-driver">–</div>
       </div>
     </div>
-
-    <div id="canvas-wrapper">
+    <div id="canvas-wrap">
       <canvas id="game-canvas"></canvas>
-      <div id="goal-banner"></div>
+      <div id="countdown" class="hidden"></div>
+      <div id="msg-banner" class="hidden"></div>
     </div>
-
-    <div id="controls-bar">
-      <div class="control-hint">
-        <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> oder
-        <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd>
-        Bewegen
-      </div>
-      <div class="control-hint">
-        <kbd>Space</kbd> Schuss aufs Tor
-      </div>
-      <div class="control-hint">
-        <kbd>Esc</kbd> Pause
-      </div>
-      <button id="pause-btn" class="btn-secondary">⏸ Pause</button>
+    <div id="race-controls">
+      <span><kbd>W</kbd>/<kbd>↑</kbd> Gas</span>
+      <span><kbd>S</kbd>/<kbd>↓</kbd> Bremse</span>
+      <span><kbd>A</kbd>/<kbd>←</kbd> Links</span>
+      <span><kbd>D</kbd>/<kbd>→</kbd> Rechts</span>
     </div>
   </div>
 
-  <!-- ===== PAUSE SCREEN ===== -->
-  <div id="pause-screen" class="overlay-screen hidden">
+  <!-- RESULT -->
+  <div id="screen-result" class="overlay-screen hidden">
     <div class="overlay-box">
-      <h2 style="color:#f0c040">⏸ Pause</h2>
+      <h2 id="result-title">Ergebnis</h2>
+      <div id="result-list"></div>
       <div class="overlay-buttons">
-        <button id="resume-btn" class="btn-primary">▶ &nbsp;Weiter</button>
-        <button onclick="location.reload()" class="btn-secondary">🏠 &nbsp;Menü</button>
+        <button id="btn-next" class="btn-primary hidden">Nächstes Rennen →</button>
+        <button id="btn-retry" class="btn-warn hidden">🔄 Nochmal versuchen</button>
+        <button onclick="location.reload()" class="btn-secondary">🏠 Menü</button>
       </div>
     </div>
   </div>
 
-  <!-- ===== GAMEOVER SCREEN ===== -->
-  <div id="gameover-screen" class="overlay-screen hidden">
-    <div class="overlay-box">
-      <h2 id="result-title">Spiel beendet</h2>
-      <div class="final-score">
-        <span id="final-player-score">0</span>
-        <span class="separator">:</span>
-        <span id="final-cpu-score">0</span>
-      </div>
-      <p class="result-subtitle" id="result-text"></p>
-      <div class="overlay-buttons">
-        <button onclick="location.reload()" class="btn-primary">🏠 &nbsp;Menü</button>
-      </div>
+  <!-- PODIUM / TROPHY -->
+  <div id="screen-podium" class="overlay-screen hidden">
+    <canvas id="podium-canvas"></canvas>
+    <div id="podium-info">
+      <div id="podium-pos"></div>
+      <div id="podium-name"></div>
+      <button id="btn-podium-next" class="btn-primary">Weiter →</button>
     </div>
   </div>
 
-  <script src="teams.js"></script>
+  <!-- CHAMPION -->
+  <div id="screen-champion" class="overlay-screen hidden">
+    <div class="champ-box">
+      <div class="champ-trophy">🏆</div>
+      <h1 class="champ-title">WELTMEISTER!</h1>
+      <div class="champ-driver" id="champ-driver-name"></div>
+      <div class="champ-sub">Alle 3 Rennen gewonnen</div>
+      <button onclick="location.reload()" class="btn-primary" style="margin-top:24px">🏠 Hauptmenü</button>
+    </div>
+  </div>
+
+  <script src="drivers.js"></script>
+  <script src="tracks.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

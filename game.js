@@ -1,819 +1,702 @@
-// ===========================
-//  CONSTANTS
-// ===========================
-const CW = 920;
-const CH = 580;
-const FX = 65;
-const FY = 45;
-const FW = 790;
-const FH = 490;
-const FCX = FX + FW / 2;
-const FCY = FY + FH / 2;
-const GOAL_H = 136;
-const GOAL_DEPTH = 38;
-const GOAL_TOP = FCY - GOAL_H / 2;
-const GOAL_BOT = FCY + GOAL_H / 2;
-const PR = 21;       // player radius (increased for visibility)
-const BR = 10;
-const GAME_SECS = 5 * 60;
+// ============================================================
+//  F1 RENNSPIEL  –  game.js
+// ============================================================
 
-// ===========================
-//  STATE
-// ===========================
+const CW = 920, CH = 580;
+const NUM_LAPS  = 5;
+const CAR_L = 24, CAR_W = 11;   // car size px
+
+// ── state ──────────────────────────────────────────────────
 let canvas, ctx;
-let state = 'selection';
-let playerTeam = null;
-let cpuTeam    = null;
-let playerScore = 0;
-let cpuScore    = 0;
-let timeLeft    = GAME_SECS;
-let lastTs      = null;
-let rafId       = null;
-let goalTimer   = 0;
-let goalSide    = null;
-let controlledP = null;
+let state = 'team';              // team | driver | countdown | race | result | podium | champion
+let playerTeam   = null;
+let playerDriver = null;
+let trackIdx     = 0;            // 0-2
+let track        = null;
+let cars         = [];
+let playerCar    = null;
+let raceTime     = 0;
+let countdownVal = 3;
+let countdownTimer = 0;
+let lastTs       = null;
+let rafId        = null;
+let raceFinished = false;
 
 const keys = {};
-const ball  = { x: FCX, y: FCY, vx: 0, vy: 0 };
-let players = [];
 
-// ===========================
-//  PLAYER CLASS
-// ===========================
-class Player {
-  constructor(x, y, team, role, teamData, number) {
-    this.x  = x; this.startX = x;
-    this.y  = y; this.startY = y;
-    this.vx = 0; this.vy = 0;
-    this.team   = team;
-    this.role   = role;
-    this.data   = teamData;
-    this.number = number;
-    this.maxSpd = this._calcSpeed();
-  }
-
-  _calcSpeed() {
-    const base     = 3.2 + (this.data.speed / 100) * 2.4;
-    const roleMult = { gk: 0.78, def: 0.88, mid: 0.97, att: 1.08 }[this.role] ?? 1;
-    const teamMult = this.team === 'cpu' ? 0.78 : 1.0; // CPU is noticeably slower
-    return base * roleMult * teamMult;
-  }
-}
-
-// ===========================
-//  BOOT
-// ===========================
+// ── boot ───────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   canvas = document.getElementById('game-canvas');
   ctx    = canvas.getContext('2d');
   canvas.width  = CW;
   canvas.height = CH;
 
-  buildTeamGrid();
-  setupInput();
+  window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+  });
+  window.addEventListener('keyup', e => { keys[e.code] = false; });
 
-  document.getElementById('start-btn').addEventListener('click', startGame);
-  document.getElementById('pause-btn').addEventListener('click', togglePause);
-  document.getElementById('resume-btn').addEventListener('click', togglePause);
+  buildTeamGrid();
 });
 
-// ===========================
-//  TEAM SELECTION
-// ===========================
+// ── SELECTION ───────────────────────────────────────────────
+function showTeamSelect() {
+  showOnly('screen-team');
+}
+
 function buildTeamGrid() {
-  const grid = document.getElementById('teams-grid');
-  TEAMS.forEach(t => {
+  const grid = document.getElementById('team-grid');
+  F1_TEAMS.forEach(t => {
     const card = document.createElement('div');
     card.className = 'team-card';
-    const textCol = isColorLight(t.primaryColor) ? '#111' : '#fff';
+    const light = isLight(t.color1);
     card.innerHTML = `
-      <div class="team-emblem" style="background:${t.primaryColor};color:${textCol};border:3px solid ${t.secondaryColor}">${t.shortName}</div>
-      <div class="team-name">${t.name}</div>
-      <div class="team-country">${t.country}</div>
-      <div class="team-rating">★ ${t.rating}</div>
+      <div class="team-logo" style="background:${t.color1};color:${light?'#000':'#fff'};border:3px solid ${t.color2}">${t.short}</div>
+      <div class="t-name">${t.name}</div>
+      <div class="t-speed">Stärke: ${'★'.repeat(Math.round(t.speed/10)-7)}</div>
     `;
-    card.addEventListener('click', () => {
-      document.querySelectorAll('.team-card').forEach(c => c.classList.remove('selected'));
-      card.classList.add('selected');
-      playerTeam = t;
-      const others = TEAMS.filter(o => o.id !== t.id);
-      cpuTeam = others[Math.floor(Math.random() * others.length)];
-      document.getElementById('selected-name').textContent = t.name;
-      document.getElementById('selected-info').classList.remove('hidden');
-    });
+    card.addEventListener('click', () => openDriverSelect(t));
     grid.appendChild(card);
   });
 }
 
-function isColorLight(hex) {
-  const v = parseInt(hex.replace('#',''), 16);
-  return (0.299*((v>>16)&255) + 0.587*((v>>8)&255) + 0.114*(v&255)) > 160;
+function openDriverSelect(team) {
+  playerTeam = team;
+  document.getElementById('driver-team-title').textContent = team.name;
+  document.getElementById('driver-team-title').style.color = team.color1;
+  const cards = document.getElementById('driver-cards');
+  cards.innerHTML = '';
+  team.drivers.forEach(d => {
+    const card = document.createElement('div');
+    card.className = 'driver-card';
+    card.innerHTML = `
+      <div class="driver-num" style="color:${team.color1}">#${d.num}</div>
+      <div class="driver-name">${d.name}</div>
+      <div class="driver-team-sub">${team.name}</div>
+    `;
+    card.addEventListener('click', () => { playerDriver = d; startRaceFromTrack(0); });
+    cards.appendChild(card);
+  });
+  showOnly('screen-driver');
 }
 
-// ===========================
-//  GAME START
-// ===========================
-function startGame() {
-  if (!playerTeam) return;
-  document.getElementById('selection-screen').classList.add('hidden');
-  document.getElementById('game-screen').classList.remove('hidden');
+function startRaceFromTrack(idx) {
+  trackIdx = idx;
+  track    = TRACKS[idx];
+  buildRace();
+  startCountdown();
+}
 
-  playerScore = 0; cpuScore = 0;
-  timeLeft = GAME_SECS;
-  state = 'playing';
+// ── BUILD RACE ──────────────────────────────────────────────
+function buildRace() {
+  cars = [];
+  const wp = track.waypoints;
+  const n  = wp.length;
 
-  setupHUD();
-  spawnPlayers();
-  resetKickoff(null);
-  updateHUD();
+  // direction at start
+  const p0 = wp[0], p1 = wp[1];
+  const dx = p1.x - p0.x, dy = p1.y - p0.y;
+  const len = Math.hypot(dx, dy);
+  const tx = dx/len, ty = dy/len;   // tangent
+  const px = -ty,    py = tx;       // perpendicular
+
+  // Build grid of all 20 drivers  ─── player + all others
+  const allDrivers = [];
+  F1_TEAMS.forEach(t => {
+    t.drivers.forEach(d => {
+      const isPlayer = (t.id === playerTeam.id && d.num === playerDriver.num);
+      allDrivers.push({ team: t, driver: d, isPlayer, speed: t.speed });
+    });
+  });
+
+  // Sort by speed (descending) → pole for fastest, but add some noise
+  allDrivers.sort((a, b) => (b.speed + Math.random()*8) - (a.speed + Math.random()*8));
+
+  // Player always gets grid position based on their team speed
+  const pIdx = allDrivers.findIndex(d => d.isPlayer);
+  // Keep player roughly in their merit position (±3)
+  const targetPos = Math.max(0, Math.min(19, allDrivers.length - 1 - Math.round((playerTeam.speed - 78) / (98-78) * 18)));
+  if (pIdx !== targetPos) {
+    const [pl] = allDrivers.splice(pIdx, 1);
+    allDrivers.splice(targetPos, 0, pl);
+  }
+
+  allDrivers.forEach((entry, gridPos) => {
+    const row = Math.floor(gridPos / 2);
+    const col = (gridPos % 2 === 0) ? -1 : 1;
+
+    const gx = p0.x - tx * (row * 42 + 22) + px * col * 17;
+    const gy = p0.y - ty * (row * 42 + 22) + py * col * 17;
+    const angle = Math.atan2(ty, tx);
+
+    const maxSpd = (120 + (entry.speed - 78) * 4.5) + (entry.isPlayer ? 0 : (Math.random()-0.5)*20);
+
+    const car = {
+      x: gx, y: gy, angle,
+      speed: 0, velX: 0, velY: 0,
+      maxSpeed: maxSpd,
+      team: entry.team, driver: entry.driver,
+      isPlayer: entry.isPlayer,
+      laps: 0,
+      wpIdx: 0,        // current target waypoint
+      cpPassed: [],    // checkpoints passed this lap
+      finished: false,
+      finishTime: 0,
+      lapTime: 0, bestLap: Infinity,
+      gridPos
+    };
+    cars.push(car);
+    if (entry.isPlayer) playerCar = car;
+  });
+
+  raceTime     = 0;
+  raceFinished = false;
+  document.getElementById('hud-track').textContent = track.name;
+  document.getElementById('hud-driver').textContent = `${playerDriver.name}`;
+}
+
+// ── COUNTDOWN ───────────────────────────────────────────────
+function startCountdown() {
+  showOnly('screen-race');
+  const cd = document.getElementById('countdown');
+  countdownVal   = 3;
+  countdownTimer = 0;
+  state = 'countdown';
+  lastTs = null;
 
   if (rafId) cancelAnimationFrame(rafId);
-  lastTs = null;
   rafId = requestAnimationFrame(loop);
 }
 
-function setupHUD() {
-  const pLight = isColorLight(playerTeam.primaryColor);
-  const cLight = isColorLight(cpuTeam.primaryColor);
-
-  const pb = document.getElementById('player-badge');
-  pb.textContent = playerTeam.shortName;
-  pb.style.background = playerTeam.primaryColor;
-  pb.style.color = pLight ? '#111' : '#fff';
-  pb.style.border = `2px solid ${playerTeam.secondaryColor}`;
-
-  const cb = document.getElementById('cpu-badge');
-  cb.textContent = cpuTeam.shortName;
-  cb.style.background = cpuTeam.primaryColor;
-  cb.style.color = cLight ? '#111' : '#fff';
-  cb.style.border = `2px solid ${cpuTeam.secondaryColor}`;
-
-  document.getElementById('player-team-name').textContent = playerTeam.name;
-  document.getElementById('cpu-team-name').textContent    = cpuTeam.name;
-}
-
-// ===========================
-//  SPAWN PLAYERS
-// ===========================
-function spawnPlayers() {
-  players = [];
-  // Player team (left side, attacks right)
-  players.push(new Player( 98, FCY,      'player', 'gk',  playerTeam,  1));
-  players.push(new Player(215, FCY - 65, 'player', 'def', playerTeam,  5));
-  players.push(new Player(215, FCY + 65, 'player', 'def', playerTeam,  6));
-  players.push(new Player(360, FCY,      'player', 'mid', playerTeam,  8));
-  players.push(new Player(445, FCY - 35, 'player', 'att', playerTeam,  9));
-
-  // CPU team (right side, attacks left)
-  players.push(new Player(822, FCY,      'cpu', 'gk',  cpuTeam,  1));
-  players.push(new Player(705, FCY + 65, 'cpu', 'def', cpuTeam,  3));
-  players.push(new Player(705, FCY - 65, 'cpu', 'def', cpuTeam,  4));
-  players.push(new Player(560, FCY,      'cpu', 'mid', cpuTeam,  7));
-  players.push(new Player(475, FCY + 35, 'cpu', 'att', cpuTeam, 11));
-}
-
-function resetKickoff(scorer) {
-  players.forEach(p => { p.x = p.startX; p.y = p.startY; p.vx = 0; p.vy = 0; });
-  ball.x = FCX; ball.y = FCY;
-  ball.vx = scorer === 'player' ? -1.2 : 1.2;
-  ball.vy = 0;
-  controlledP = null;
-}
-
-// ===========================
-//  INPUT
-// ===========================
-function setupInput() {
-  window.addEventListener('keydown', e => {
-    keys[e.code] = true;
-    keys[e.key]  = true;
-    if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
-    if (e.code === 'Space' && state === 'playing') shoot();
-    if (e.code === 'Escape') togglePause();
-  });
-  window.addEventListener('keyup', e => {
-    keys[e.code] = false;
-    keys[e.key]  = false;
-  });
-}
-
-function togglePause() {
-  if (state === 'playing') {
-    state = 'paused';
-    document.getElementById('pause-screen').classList.remove('hidden');
-  } else if (state === 'paused') {
-    state = 'playing';
-    document.getElementById('pause-screen').classList.add('hidden');
-    lastTs = null;
-  }
-}
-
-// ===========================
-//  MAIN LOOP
-// ===========================
+// ── GAME LOOP ────────────────────────────────────────────────
 function loop(ts) {
   rafId = requestAnimationFrame(loop);
   if (!lastTs) lastTs = ts;
   const dt = Math.min((ts - lastTs) / 1000, 0.05);
   lastTs = ts;
 
-  if (state === 'playing') {
+  if (state === 'countdown') {
+    // Just render track and grid, count down
+    render();
+    countdownTimer -= dt;
+    if (countdownTimer <= 0) {
+      countdownVal--;
+      countdownTimer = 1;
+      const cd = document.getElementById('countdown');
+      if (countdownVal > 0) {
+        cd.textContent = countdownVal;
+        cd.classList.remove('hidden');
+        void cd.offsetWidth; // restart animation
+        cd.classList.remove('hidden');
+      } else if (countdownVal === 0) {
+        cd.textContent = 'START!';
+        cd.style.color = '#3fb950';
+      } else {
+        cd.classList.add('hidden');
+        state = 'race';
+      }
+    }
+  } else if (state === 'race') {
     update(dt);
-  } else if (state === 'goal') {
-    goalTimer -= dt;
-    if (goalTimer <= 0) {
-      document.getElementById('goal-banner').classList.remove('show');
-      state = 'playing';
-      resetKickoff(goalSide);
-    }
+    render();
+  } else if (state === 'result') {
+    render();
   }
-  render();
 }
 
-// ===========================
-//  UPDATE
-// ===========================
+// ── UPDATE ──────────────────────────────────────────────────
 function update(dt) {
-  timeLeft -= dt;
-  if (timeLeft <= 0) { timeLeft = 0; endGame(); return; }
+  raceTime += dt;
+
+  cars.forEach(car => {
+    if (car.finished) return;
+    car.lapTime += dt;
+    if (car.isPlayer) updatePlayer(car, dt);
+    else              updateAI(car, dt);
+    applyPhysics(car, dt);
+    checkWaypoints(car);
+  });
+
   updateHUD();
-  selectControlled();
-  moveControlled();
-  moveAI();
-  physBall();
-  resolveAllCollisions();
-  detectGoal();
+  checkRaceEnd();
 }
 
-function selectControlled() {
-  let best = null, bestD = Infinity;
-  players.forEach(p => {
-    if (p.team !== 'player' || p.role === 'gk') return;
-    const d = dist(p, ball);
-    if (d < bestD) { bestD = d; best = p; }
-  });
-  controlledP = best;
+// ── PLAYER PHYSICS ───────────────────────────────────────────
+function updatePlayer(car, dt) {
+  const throttle = keys['KeyW'] || keys['ArrowUp']   ? 1 : 0;
+  const brake    = keys['KeyS'] || keys['ArrowDown']  ? 1 : 0;
+  const steerL   = keys['KeyA'] || keys['ArrowLeft']  ? 1 : 0;
+  const steerR   = keys['KeyD'] || keys['ArrowRight'] ? 1 : 0;
+
+  const accel = 320 * dt;
+  const brkF  = 500 * dt;
+  const steer = 2.8 * dt * Math.min(1, car.speed / (car.maxSpeed * 0.4));
+
+  car.speed += (throttle * accel) - (brake * brkF);
+  car.speed  = Math.max(0, Math.min(car.maxSpeed, car.speed));
+  car.angle += (steerR - steerL) * steer;
 }
 
-function moveControlled() {
-  const p = controlledP;
-  if (!p) return;
+// ── AI PHYSICS ───────────────────────────────────────────────
+function updateAI(car, dt) {
+  const wp = track.waypoints;
+  const target = wp[car.wpIdx];
+  const dx = target.x - car.x, dy = target.y - car.y;
+  const distToWP = Math.hypot(dx, dy);
 
-  let dx = 0, dy = 0;
-  if (keys['ArrowLeft']  || keys['KeyA']) dx -= 1;
-  if (keys['ArrowRight'] || keys['KeyD']) dx += 1;
-  if (keys['ArrowUp']    || keys['KeyW']) dy -= 1;
-  if (keys['ArrowDown']  || keys['KeyS']) dy += 1;
+  // Angle to target
+  const targetAngle = Math.atan2(dy, dx);
+  let angleDiff = targetAngle - car.angle;
+  while (angleDiff >  Math.PI) angleDiff -= 2*Math.PI;
+  while (angleDiff < -Math.PI) angleDiff += 2*Math.PI;
 
-  if (dx || dy) {
-    const len = Math.hypot(dx, dy);
-    p.vx = (dx/len) * p.maxSpd;
-    p.vy = (dy/len) * p.maxSpd;
-  } else {
-    p.vx *= 0.75;
-    p.vy *= 0.75;
+  // Speed: slow down for tight corners
+  const cornerFactor = Math.max(0.45, 1 - Math.abs(angleDiff) * 0.6);
+  const targetSpeed = car.maxSpeed * cornerFactor;
+
+  // Gradually match speed
+  const accel = targetSpeed > car.speed ? 260 * dt : -400 * dt;
+  car.speed = Math.max(0, Math.min(car.maxSpeed, car.speed + accel));
+
+  // Steer
+  const steerRate = 3.0 * dt;
+  car.angle += Math.max(-steerRate, Math.min(steerRate, angleDiff * 3 * dt));
+
+  // Advance waypoint
+  if (distToWP < 28) {
+    car.wpIdx = (car.wpIdx + 1) % track.numWP;
   }
-
-  p.x = clamp(p.x + p.vx, FX + PR, FX + FW - PR);
-  p.y = clamp(p.y + p.vy, FY + PR, FY + FH - PR);
 }
 
-// ===========================
-//  AI (improved)
-// ===========================
-function moveAI() {
-  players.forEach(p => {
-    if (p === controlledP) return;
+// ── PHYSICS / MOVEMENT ───────────────────────────────────────
+function applyPhysics(car, dt) {
+  const onTrack = isOnTrack(car);
+  const drag = onTrack ? 0.018 : 0.055;
+  car.speed = Math.max(0, car.speed * (1 - drag));
 
-    let tx, ty;
+  car.x += Math.cos(car.angle) * car.speed * dt;
+  car.y += Math.sin(car.angle) * car.speed * dt;
+}
 
-    // ---- PLAYER TEAM (AI-controlled: GK + formation) ----
-    if (p.team === 'player') {
+// ── TRACK DETECTION ──────────────────────────────────────────
+function isOnTrack(car) {
+  return distFromCenterline(car.x, car.y) <= track.width / 2 + 4;
+}
 
-      if (p.role === 'gk') {
-        // Goalkeeper: guard line, rush if ball is near
-        const inDanger = ball.x < FX + 200 && ball.y > GOAL_TOP - 70 && ball.y < GOAL_BOT + 70;
-        const inArea   = ball.x < FX + 140;
+function distFromCenterline(x, y) {
+  const wp = track.waypoints;
+  const n  = wp.length;
+  let min  = Infinity;
+  for (let i = 0; i < n; i++) {
+    const a = wp[i], b = wp[(i+1)%n];
+    const ax = b.x-a.x, ay = b.y-a.y;
+    const lenSq = ax*ax+ay*ay;
+    if (lenSq < 0.001) continue;
+    const t = Math.max(0, Math.min(1, ((x-a.x)*ax+(y-a.y)*ay)/lenSq));
+    const d = Math.hypot(x-(a.x+ax*t), y-(a.y+ay*t));
+    if (d < min) min = d;
+  }
+  return min;
+}
 
-        if (inArea) {
-          // Rush to intercept
-          tx = Math.max(FX + 22, ball.x - 12);
-          ty = ball.y;
-        } else if (inDanger) {
-          // Come off line to cut angle
-          const pct = (ball.x - FX) / 200;
-          tx = FX + 22 + pct * 70;
-          ty = clamp(ball.y, GOAL_TOP + PR, GOAL_BOT - PR);
-        } else {
-          // Track ball horizontally up to a limit, vertically along goal
-          tx = FX + 22 + Math.max(0, (ball.x - FCX) * 0.04);
-          ty = clamp(ball.y, GOAL_TOP + PR + 5, GOAL_BOT - PR - 5);
-        }
-      }
+// ── LAP / CHECKPOINT ─────────────────────────────────────────
+function checkWaypoints(car) {
+  const wp  = track.waypoints;
+  const n   = wp.length;
+  const cps = track.checkpoints;
 
-      else if (p.role === 'def') {
-        if (ball.x < FCX) {
-          // Ball in our half: intercept between ball and goal
-          tx = clamp((FX + ball.x) * 0.5 + 50, FX + PR + 5, FCX - 20);
-          ty = clamp(ball.y, FY + PR, FY + FH - PR);
-        } else {
-          // Ball in CPU half: hold defensive shape
-          tx = p.startX;
-          ty = p.startY + (ball.y - FCY) * 0.22;
-        }
-      }
+  // Check checkpoints
+  cps.forEach((cpWp, i) => {
+    if (car.cpPassed.includes(i)) return;
+    const d = Math.hypot(car.x - wp[cpWp].x, car.y - wp[cpWp].y);
+    if (d < track.width) car.cpPassed.push(i);
+  });
 
-      else if (p.role === 'mid') {
-        // Support: stay between start and ball
-        const mx = clamp(ball.x * 0.45 + p.startX * 0.55, p.startX - 40, FCX + 30);
-        const my = p.startY + (ball.y - FCY) * 0.35;
-        tx = mx; ty = clamp(my, FY + PR, FY + FH - PR);
-      }
+  // Check lap completion (near waypoint 0 = start/finish)
+  const d0 = Math.hypot(car.x - wp[0].x, car.y - wp[0].y);
+  if (d0 < track.width && car.cpPassed.length >= Math.floor(cps.length * 0.7) && car.wpIdx > n * 0.3) {
+    car.laps++;
+    if (car.lapTime < car.bestLap) car.bestLap = car.lapTime;
+    car.lapTime  = 0;
+    car.cpPassed = [];
 
-      else if (p.role === 'att') {
-        // Make runs into space ahead of ball
-        tx = clamp(ball.x + 60, p.startX - 30, FX + FW - PR - 10);
-        ty = p.startY + (ball.y - FCY) * 0.4;
-        ty = clamp(ty, FY + PR, FY + FH - PR);
-      }
+    if (car.laps >= NUM_LAPS) {
+      car.finished   = true;
+      car.finishTime = raceTime;
     }
+  }
+}
 
-    // ---- CPU TEAM (AI-controlled, intentionally limited) ----
-    else if (p.team === 'cpu') {
-
-      if (p.role === 'gk') {
-        // CPU GK: stay close to goal, track ball on Y
-        const cpuInDanger = ball.x > FX + FW - 200 && ball.y > GOAL_TOP - 60 && ball.y < GOAL_BOT + 60;
-        if (cpuInDanger) {
-          tx = Math.min(FX + FW - 20, ball.x + 12);
-          ty = ball.y;
-        } else {
-          tx = FX + FW - 22;
-          ty = clamp(ball.y, GOAL_TOP + PR + 5, GOAL_BOT - PR - 5);
-        }
-      }
-
-      else if (p.role === 'def') {
-        // CPU defenders: conservative, mostly stay in their half
-        if (ball.x > FX + FW * 0.72) {
-          // Ball near CPU goal - can press ball
-          tx = ball.x - 45;
-          ty = ball.y;
-        } else {
-          // Ball elsewhere - hold defensive shape
-          tx = p.startX;
-          ty = p.startY + (ball.y - FCY) * 0.25;
-        }
-      }
-
-      else if (p.role === 'mid') {
-        // CPU mid: chase ball but only in own half
-        if (ball.x > FCX - 60) {
-          tx = ball.x + 18;
-          ty = ball.y;
-        } else {
-          // Ball in player half - hold midfield position
-          tx = FCX + 30;
-          ty = FCY + (ball.y - FCY) * 0.4;
-        }
-      }
-
-      else if (p.role === 'att') {
-        // CPU attacker: lurk rather than over-chase
-        if (ball.x > FCX + 30) {
-          // Ball in CPU half - close in
-          tx = ball.x;
-          ty = ball.y;
-        } else if (ball.x > FCX - 100) {
-          // Ball near center - attack position
-          tx = FCX + 35;
-          ty = ball.y;
-        } else {
-          // Ball deep in player half - don't rush in, hold at midfield
-          tx = FCX + 10;
-          ty = p.startY + (ball.y - FCY) * 0.3;
-        }
-      }
-    }
-
-    if (tx !== undefined) {
-      const dx = tx - p.x, dy = ty - p.y;
-      const d  = Math.hypot(dx, dy);
-      if (d > 3) {
-        p.vx = (dx/d) * p.maxSpd;
-        p.vy = (dy/d) * p.maxSpd;
-      } else { p.vx = 0; p.vy = 0; }
-      p.x = clamp(p.x + p.vx, FX + PR, FX + FW - PR);
-      p.y = clamp(p.y + p.vy, FY + PR, FY + FH - PR);
-    }
+// ── RACE POSITION ────────────────────────────────────────────
+function getPositions() {
+  return [...cars].sort((a, b) => {
+    if (a.finished && b.finished) return a.finishTime - b.finishTime;
+    if (a.finished) return -1;
+    if (b.finished) return 1;
+    const progA = a.laps * track.numWP + a.wpIdx;
+    const progB = b.laps * track.numWP + b.wpIdx;
+    return progB - progA;
   });
 }
 
-// ===========================
-//  BALL PHYSICS
-// ===========================
-function physBall() {
-  ball.vx *= 0.982;
-  ball.vy *= 0.982;
-  if (Math.abs(ball.vx) < 0.04) ball.vx = 0;
-  if (Math.abs(ball.vy) < 0.04) ball.vy = 0;
+function getPlayerPos() {
+  return getPositions().findIndex(c => c.isPlayer) + 1;
+}
 
-  ball.x += ball.vx;
-  ball.y += ball.vy;
+// ── HUD ──────────────────────────────────────────────────────
+function updateHUD() {
+  const pos = getPlayerPos();
+  document.getElementById('hud-pos').textContent = `P${pos}`;
+  document.getElementById('hud-lap').textContent = `Runde ${Math.min(playerCar.laps+1, NUM_LAPS)} / ${NUM_LAPS}`;
+  document.getElementById('hud-speed').textContent = `${Math.round(playerCar.speed * 3.6)} km/h`;
+  const m = Math.floor(raceTime/60), s = (raceTime%60).toFixed(3);
+  document.getElementById('hud-timer').textContent = `${m}:${parseFloat(s)<10?'0':''}${s}`;
+}
 
-  const inGoalY = ball.y > GOAL_TOP - BR && ball.y < GOAL_BOT + BR;
-
-  if (ball.y - BR < FY)      { ball.y = FY + BR;      ball.vy =  Math.abs(ball.vy) * 0.65; }
-  if (ball.y + BR > FY + FH) { ball.y = FY + FH - BR; ball.vy = -Math.abs(ball.vy) * 0.65; }
-
-  if (ball.x - BR < FX && !inGoalY) { ball.x = FX + BR; ball.vx =  Math.abs(ball.vx) * 0.65; }
-  if (ball.x + BR > FX + FW && !inGoalY) { ball.x = FX + FW - BR; ball.vx = -Math.abs(ball.vx) * 0.65; }
-
-  if (ball.x - BR < FX - GOAL_DEPTH) { ball.x = FX - GOAL_DEPTH + BR; ball.vx =  Math.abs(ball.vx) * 0.5; }
-  if (ball.x + BR > FX + FW + GOAL_DEPTH) { ball.x = FX + FW + GOAL_DEPTH - BR; ball.vx = -Math.abs(ball.vx) * 0.5; }
-
-  // Goal post crossbar
-  const inGoalZone = ball.x < FX + 5 || ball.x > FX + FW - 5;
-  if (inGoalZone && ball.x > FX - GOAL_DEPTH && ball.x < FX + FW + GOAL_DEPTH) {
-    if (ball.y - BR < GOAL_TOP) { ball.y = GOAL_TOP + BR; ball.vy =  Math.abs(ball.vy) * 0.6; }
-    if (ball.y + BR > GOAL_BOT) { ball.y = GOAL_BOT - BR; ball.vy = -Math.abs(ball.vy) * 0.6; }
+// ── RACE END ─────────────────────────────────────────────────
+function checkRaceEnd() {
+  if (raceFinished) return;
+  const allDone = cars.filter(c => c.finished).length >= 1;
+  // End when player finishes or all top cars finish
+  const anyTop3Done = getPositions().slice(0,3).some(c => c.finished);
+  if (!anyTop3Done) return;
+  if (!playerCar.finished) {
+    // Give player a bit more time after leaders finish
+    const leadersFinished = cars.filter(c => c.finished);
+    if (leadersFinished.length > 0 && (raceTime - Math.min(...leadersFinished.map(c => c.finishTime))) > 30) {
+      playerCar.finished = true;
+      playerCar.finishTime = raceTime;
+    } else if (playerCar.finished) { /* already done */ }
+    else return;
   }
+  raceFinished = true;
+  state = 'result';
+  setTimeout(showResults, 800);
 }
 
-// ===========================
-//  COLLISIONS
-// ===========================
-function resolveAllCollisions() {
-  players.forEach(p => {
-    const d = dist(p, ball);
-    const minD = PR + BR;
-    if (d < minD && d > 0.01) {
-      const nx = (ball.x - p.x) / d;
-      const ny = (ball.y - p.y) / d;
-
-      // Push ball out of overlap
-      ball.x += nx * (minD - d);
-      ball.y += ny * (minD - d);
-
-      const spd  = Math.hypot(p.vx, p.vy);
-      const kick = Math.max(5, spd * 1.5);
-
-      ball.vx = nx * kick + p.vx * 0.45;
-      ball.vy = ny * kick + p.vy * 0.45;
-
-      // CPU outfield: aim toward player goal but with lots of inaccuracy
-      if (p.team === 'cpu' && p.role !== 'gk') {
-        const distToGoal = Math.hypot(ball.x - FX, ball.y - FCY);
-        // Less accurate the farther from goal; max aim blend is low
-        const closeBonus = Math.max(0, 1 - distToGoal / (FW * 0.55));
-        const acc     = 0.07 + closeBonus * 0.14; // max ~21% aim at close range
-        const scatter = GOAL_H * 1.4 + (1 - p.data.attackRating / 100) * GOAL_H;
-        const ty = FCY + (Math.random() - 0.5) * scatter;
-        const tdx = FX - 10 - ball.x, tdy = ty - ball.y;
-        const tl  = Math.hypot(tdx, tdy);
-        if (tl > 0) {
-          ball.vx = lerp(ball.vx, (tdx/tl) * kick, acc);
-          ball.vy = lerp(ball.vy, (tdy/tl) * kick, acc);
-        }
-      }
-
-      // GKs punt ball away from their goal
-      if (p.role === 'gk') {
-        if (p.team === 'cpu') {
-          ball.vx = -Math.abs(ball.vx) * 1.5 - 5;
-          ball.vy = (Math.random() - 0.5) * 8;
-        } else {
-          ball.vx =  Math.abs(ball.vx) * 1.5 + 5;
-          ball.vy = (Math.random() - 0.5) * 8;
-        }
-      }
-    }
-  });
-
-  // Separate overlapping players
-  for (let i = 0; i < players.length; i++) {
-    for (let j = i+1; j < players.length; j++) {
-      const a = players[i], b = players[j];
-      const d = dist(a, b);
-      if (d < PR * 2 && d > 0.01) {
-        const nx = (b.x - a.x) / d;
-        const ny = (b.y - a.y) / d;
-        const push = (PR * 2 - d) * 0.42;
-        a.x -= nx * push; a.y -= ny * push;
-        b.x += nx * push; b.y += ny * push;
-        a.x = clamp(a.x, FX+PR, FX+FW-PR); a.y = clamp(a.y, FY+PR, FY+FH-PR);
-        b.x = clamp(b.x, FX+PR, FX+FW-PR); b.y = clamp(b.y, FY+PR, FY+FH-PR);
-      }
-    }
-  }
-}
-
-// ===========================
-//  SHOOT (Space)
-// ===========================
-function shoot() {
-  const p = controlledP;
-  if (!p) return;
-  if (dist(p, ball) > PR + BR + 30) return;
-
-  const scatter = (Math.random() - 0.5) * GOAL_H * 0.55;
-  const ty = FCY + scatter;
-  const tx = FX + FW + GOAL_DEPTH;
-  const dx = tx - ball.x, dy = ty - ball.y;
-  const l  = Math.hypot(dx, dy);
-  const pwr = 16 + Math.hypot(p.vx, p.vy) * 0.5;
-  ball.vx = (dx/l) * pwr;
-  ball.vy = (dy/l) * pwr;
-}
-
-// ===========================
-//  GOAL DETECTION
-// ===========================
-function detectGoal() {
-  const inBand = ball.y >= GOAL_TOP && ball.y <= GOAL_BOT;
-  if (ball.x < FX - 4 && inBand)       { cpuScore++;    goalSide = 'cpu';    showGoal(); }
-  else if (ball.x > FX + FW + 4 && inBand) { playerScore++; goalSide = 'player'; showGoal(); }
-}
-
-function showGoal() {
-  state = 'goal';
-  goalTimer = 2.8;
-  updateHUD();
-  const banner = document.getElementById('goal-banner');
-  if (goalSide === 'player') {
-    banner.textContent = '⚽  TOR!';
-    banner.className = 'player-goal show';
-  } else {
-    banner.textContent = '💔  Gegentor!';
-    banner.className = 'cpu-goal show';
-  }
-}
-
-// ===========================
-//  END GAME
-// ===========================
-function endGame() {
-  state = 'gameover';
+// ── SHOW RESULTS ────────────────────────────────────────────
+function showResults() {
   cancelAnimationFrame(rafId);
-
-  document.getElementById('final-player-score').textContent = playerScore;
-  document.getElementById('final-player-score').style.color = playerTeam.primaryColor;
-  document.getElementById('final-cpu-score').textContent = cpuScore;
-  document.getElementById('final-cpu-score').style.color = cpuTeam.primaryColor;
+  const positions = getPositions();
+  const playerPos = positions.findIndex(c => c.isPlayer) + 1;
 
   const title = document.getElementById('result-title');
-  const text  = document.getElementById('result-text');
+  if (playerPos === 1) { title.textContent = '🏆 1. Platz!'; title.style.color='#FFD700'; }
+  else if (playerPos <= 3) { title.textContent = `🥈 ${playerPos}. Platz!`; title.style.color='#C0C0C0'; }
+  else { title.textContent = `${playerPos}. Platz`; title.style.color='#e10600'; }
 
-  if (playerScore > cpuScore) {
-    title.textContent = '🏆 Sieg!'; title.style.color = '#3fb950';
-    text.textContent  = `${playerTeam.name} gewinnt das Spiel!`;
-  } else if (cpuScore > playerScore) {
-    title.textContent = '😔 Niederlage'; title.style.color = '#f85149';
-    text.textContent  = `${cpuTeam.name} gewinnt das Spiel.`;
-  } else {
-    title.textContent = '🤝 Unentschieden'; title.style.color = '#f0c040';
-    text.textContent  = 'Das Spiel endet remis!';
-  }
-  document.getElementById('gameover-screen').classList.remove('hidden');
-  render();
-}
-
-// ===========================
-//  HUD
-// ===========================
-function updateHUD() {
-  document.getElementById('player-score').textContent = playerScore;
-  document.getElementById('cpu-score').textContent    = cpuScore;
-  const m = Math.floor(timeLeft / 60);
-  const s = Math.floor(timeLeft % 60);
-  const el = document.getElementById('timer');
-  el.textContent = `${m}:${s.toString().padStart(2,'0')}`;
-  el.classList.toggle('urgent', timeLeft < 60);
-}
-
-// ===========================
-//  RENDER
-// ===========================
-function render() {
-  ctx.clearRect(0, 0, CW, CH);
-  ctx.fillStyle = '#0d1117';
-  ctx.fillRect(0, 0, CW, CH);
-  drawField();
-  drawPlayerShadows();
-  drawPlayers();
-  drawBall();
-  drawTeamLabels();
-}
-
-// ===========================
-//  DRAW FIELD
-// ===========================
-function drawField() {
-  for (let i = 0; i < 10; i++) {
-    ctx.fillStyle = i % 2 === 0 ? '#1e6b1e' : '#227026';
-    ctx.fillRect(FX + i*(FW/10), FY, FW/10 + 1, FH);
-  }
-
-  // Goal nets
-  ctx.save();
-  ctx.fillStyle = 'rgba(255,255,255,0.06)';
-  ctx.fillRect(FX - GOAL_DEPTH, GOAL_TOP, GOAL_DEPTH, GOAL_H);
-  ctx.fillRect(FX + FW,         GOAL_TOP, GOAL_DEPTH, GOAL_H);
-  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-  ctx.lineWidth = 0.8;
-  for (let gx = 0; gx < GOAL_DEPTH; gx += 9) {
-    ctx.beginPath(); ctx.moveTo(FX-GOAL_DEPTH+gx, GOAL_TOP); ctx.lineTo(FX-GOAL_DEPTH+gx, GOAL_BOT); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(FX+FW+gx, GOAL_TOP);         ctx.lineTo(FX+FW+gx, GOAL_BOT);         ctx.stroke();
-  }
-  for (let gy = 0; gy < GOAL_H; gy += 9) {
-    ctx.beginPath(); ctx.moveTo(FX-GOAL_DEPTH, GOAL_TOP+gy); ctx.lineTo(FX, GOAL_TOP+gy);             ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(FX+FW, GOAL_TOP+gy);         ctx.lineTo(FX+FW+GOAL_DEPTH, GOAL_TOP+gy); ctx.stroke();
-  }
-  ctx.restore();
-
-  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(FX, FY, FW, FH);
-
-  ctx.beginPath(); ctx.moveTo(FCX, FY); ctx.lineTo(FCX, FY+FH); ctx.stroke();
-  ctx.beginPath(); ctx.arc(FCX, FCY, 68, 0, Math.PI*2); ctx.stroke();
-
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  ctx.beginPath(); ctx.arc(FCX, FCY, 5, 0, Math.PI*2); ctx.fill();
-
-  const pa_w = 138, pa_h = 274;
-  ctx.strokeRect(FX,           FCY-pa_h/2, pa_w, pa_h);
-  ctx.strokeRect(FX+FW-pa_w,   FCY-pa_h/2, pa_w, pa_h);
-
-  const ga_w = 56, ga_h = 168;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(FX,           FCY-ga_h/2, ga_w, ga_h);
-  ctx.strokeRect(FX+FW-ga_w,   FCY-ga_h/2, ga_w, ga_h);
-
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
-  [FX+104, FX+FW-104].forEach(px => { ctx.beginPath(); ctx.arc(px, FCY, 4, 0, Math.PI*2); ctx.fill(); });
-
-  ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(FX+104,    FCY, 68, -0.62*Math.PI, 0.62*Math.PI);  ctx.stroke();
-  ctx.beginPath(); ctx.arc(FX+FW-104, FCY, 68, 0.38*Math.PI, 1.62*Math.PI);  ctx.stroke();
-
-  const cr = 14;
-  [[FX,FY,0,Math.PI/2],[FX+FW,FY,Math.PI/2,Math.PI],
-   [FX,FY+FH,-Math.PI/2,0],[FX+FW,FY+FH,Math.PI,3*Math.PI/2]].forEach(([cx,cy,a1,a2]) => {
-    ctx.beginPath(); ctx.arc(cx, cy, cr, a1, a2); ctx.stroke();
+  const list = document.getElementById('result-list');
+  list.innerHTML = '';
+  positions.slice(0, 10).forEach((car, i) => {
+    const row = document.createElement('div');
+    row.className = 'result-row' + (car.isPlayer ? ' player-row' : '');
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+    const ft = car.finishTime ? fmtTime(car.finishTime) : `+${Math.round(positions[0].laps * 60 - car.laps * 60)}s`;
+    row.innerHTML = `
+      <span class="result-pos">${medal}</span>
+      <span class="result-car" style="background:${car.team.color1};border:2px solid ${car.team.color2}"></span>
+      <span class="result-name">${car.driver.name}</span>
+      <span class="result-time">${ft}</span>
+    `;
+    list.appendChild(row);
   });
 
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 5;
-  ctx.strokeRect(FX-GOAL_DEPTH, GOAL_TOP, GOAL_DEPTH, GOAL_H);
-  ctx.strokeRect(FX+FW,         GOAL_TOP, GOAL_DEPTH, GOAL_H);
+  const btnNext  = document.getElementById('btn-next');
+  const btnRetry = document.getElementById('btn-retry');
+
+  if (playerPos <= 3) {
+    if (trackIdx < 2) {
+      btnNext.classList.remove('hidden');
+      btnNext.textContent = `Nächstes Rennen: ${TRACKS[trackIdx+1].name} →`;
+      btnNext.onclick = () => showPodium(playerPos, positions);
+    } else {
+      btnNext.classList.remove('hidden');
+      btnNext.textContent = '🏆 Meister-Zeremonie →';
+      btnNext.onclick = () => showPodium(playerPos, positions);
+    }
+    btnRetry.classList.add('hidden');
+  } else {
+    btnRetry.classList.remove('hidden');
+    btnRetry.onclick = () => startRaceFromTrack(trackIdx);
+    btnNext.classList.add('hidden');
+  }
+
+  showOnly('screen-result');
 }
 
-// Draw shadows separately so they appear under all players
-function drawPlayerShadows() {
-  players.forEach(p => {
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+function fmtTime(t) {
+  const m = Math.floor(t/60), s = (t%60).toFixed(3);
+  return `${m}:${parseFloat(s)<10?'0':''}${s}`;
+}
+
+// ── PODIUM ANIMATION ─────────────────────────────────────────
+function showPodium(playerPos, positions) {
+  showOnly('screen-podium');
+
+  const pc = document.getElementById('podium-canvas');
+  const ptx = pc.getContext('2d');
+  pc.width  = 520;
+  pc.height = 340;
+
+  document.getElementById('podium-pos').textContent = playerPos === 1 ? '🥇 1. Platz' : playerPos === 2 ? '🥈 2. Platz' : '🥉 3. Platz';
+  document.getElementById('podium-name').textContent = playerDriver.name;
+
+  let frame = 0;
+  const confetti = Array.from({length:80}, () => ({
+    x: Math.random()*520, y: -10, vy: 80+Math.random()*120,
+    vx: (Math.random()-.5)*60, color: ['#FFD700','#e10600','#00D2BE','#FF8000','#3fb950'][Math.floor(Math.random()*5)],
+    w: 6+Math.random()*6, h: 4+Math.random()*4, rot: Math.random()*360, rotV: (Math.random()-.5)*360
+  }));
+
+  const podiumAnim = (ts) => {
+    frame++;
+    ptx.clearRect(0,0,520,340);
+
+    // Background
+    ptx.fillStyle = '#0a0a0f';
+    ptx.fillRect(0,0,520,340);
+
+    const t = Math.min(1, frame/80); // 0→1 over 80 frames
+
+    // Podium blocks
+    const blocks = [
+      {x:200,y:340,w:120,h:130,col:'#FFD700',lbl:'1'},
+      {x:80, y:340,w:120,h:100,col:'#C0C0C0',lbl:'2'},
+      {x:320,y:340,w:120,h:80, col:'#CD7F32',lbl:'3'},
+    ];
+    blocks.forEach(b => {
+      const h = b.h * t;
+      ptx.fillStyle = b.col;
+      ptx.fillRect(b.x, b.y - h, b.w, h);
+      ptx.fillStyle = 'rgba(0,0,0,.3)';
+      ptx.fillRect(b.x, b.y - h, b.w, 3);
+      if (t > 0.7) {
+        ptx.fillStyle = '#000';
+        ptx.font = `bold ${20*t}px Arial`;
+        ptx.textAlign = 'center';
+        ptx.textBaseline = 'bottom';
+        ptx.fillText(b.lbl, b.x + b.w/2, b.y - h + 28*t);
+      }
+    });
+
+    // Player car on 1st place podium
+    if (t > 0.6) {
+      const carT = Math.min(1,(t-0.6)/0.4);
+      ptx.save();
+      ptx.translate(260, 340 - 130*t - 20*carT);
+      ptx.rotate(Math.PI/2);
+      drawCarShape(ptx, playerTeam, 0, 0, 30, 14);
+      ptx.restore();
+    }
+
+    // Trophy rising
+    if (t > 0.75) {
+      const tT = (t - 0.75) / 0.25;
+      ptx.font = `${50*tT}px serif`;
+      ptx.textAlign = 'center';
+      ptx.textBaseline = 'bottom';
+      ptx.fillText('🏆', 260, 340 - 130 - 60*tT);
+    }
+
+    // Confetti
+    if (t > 0.8) {
+      confetti.forEach(c => {
+        c.x += c.vx * 0.016;
+        c.y += c.vy * 0.016;
+        c.rot += c.rotV * 0.016;
+        if (c.y > 350) { c.y = -10; c.x = Math.random()*520; }
+        ptx.save();
+        ptx.translate(c.x, c.y);
+        ptx.rotate(c.rot * Math.PI/180);
+        ptx.fillStyle = c.color;
+        ptx.fillRect(-c.w/2,-c.h/2,c.w,c.h);
+        ptx.restore();
+      });
+    }
+
+    if (frame < 300) requestAnimationFrame(podiumAnim);
+  };
+  requestAnimationFrame(podiumAnim);
+
+  const btnNext = document.getElementById('btn-podium-next');
+  if (trackIdx < 2) {
+    btnNext.textContent = `Nächstes Rennen →`;
+    btnNext.onclick = () => startRaceFromTrack(trackIdx + 1);
+  } else {
+    btnNext.textContent = '🏆 Ich bin Weltmeister!';
+    btnNext.onclick = () => showChampion();
+  }
+}
+
+function showChampion() {
+  document.getElementById('champ-driver-name').textContent = playerDriver.name + ' – ' + playerTeam.name;
+  showOnly('screen-champion');
+}
+
+// ── RENDER ───────────────────────────────────────────────────
+function render() {
+  ctx.clearRect(0,0,CW,CH);
+  ctx.fillStyle = '#1a5a1a';
+  ctx.fillRect(0,0,CW,CH);
+
+  drawTrack();
+  drawCars();
+  drawStartFinish();
+}
+
+function drawTrack() {
+  const wp = track.waypoints;
+  const n  = wp.length;
+
+  // Road surface
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth   = track.width;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+  ctx.beginPath();
+  ctx.moveTo(wp[0].x, wp[0].y);
+  for (let i=1; i<n; i++) ctx.lineTo(wp[i].x, wp[i].y);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Kerb borders (red/white stripes)
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth   = track.width + 10;
+  ctx.setLineDash([20, 20]);
+  ctx.beginPath();
+  ctx.moveTo(wp[0].x, wp[0].y);
+  for (let i=1; i<n; i++) ctx.lineTo(wp[i].x, wp[i].y);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Re-draw road over kerb
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth   = track.width - 4;
+  ctx.beginPath();
+  ctx.moveTo(wp[0].x, wp[0].y);
+  for (let i=1; i<n; i++) ctx.lineTo(wp[i].x, wp[i].y);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Center dashed line
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth   = 2;
+  ctx.setLineDash([14,14]);
+  ctx.beginPath();
+  ctx.moveTo(wp[0].x, wp[0].y);
+  for (let i=1; i<n; i++) ctx.lineTo(wp[i].x, wp[i].y);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawStartFinish() {
+  const wp = track.waypoints;
+  const p0 = wp[0], p1 = wp[1];
+  const dx = p1.x-p0.x, dy = p1.y-p0.y;
+  const len = Math.hypot(dx,dy);
+  const px = -dy/len, py = dx/len;
+  const hw = track.width/2 + 8;
+
+  ctx.save();
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth   = 4;
+  ctx.setLineDash([8,8]);
+  ctx.beginPath();
+  ctx.moveTo(p0.x + px*hw, p0.y + py*hw);
+  ctx.lineTo(p0.x - px*hw, p0.y - py*hw);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawCars() {
+  // Draw all AI cars first, player on top
+  const sorted = [...cars].filter(c => !c.isPlayer);
+  sorted.push(playerCar);
+
+  sorted.forEach(car => {
+    ctx.save();
+    ctx.translate(car.x, car.y);
+    ctx.rotate(car.angle);
+    drawCarShape(ctx, car.team, 0, 0, CAR_L, CAR_W);
+
+    // Number on car
+    ctx.fillStyle = isLight(car.team.color1) ? '#000' : '#fff';
+    ctx.font = `bold ${CAR_W * 0.65}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(car.driver.num, 0, 0);
+    ctx.restore();
+
+    // Player highlight
+    if (car.isPlayer) {
+      ctx.save();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth   = 2;
+      ctx.shadowBlur  = 12;
+      ctx.shadowColor = '#ffffff';
+      ctx.beginPath();
+      ctx.ellipse(car.x, car.y, CAR_L*0.75, CAR_W*1.1, car.angle, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  });
+
+  // Mini positions table (top-right corner)
+  drawMiniStandings();
+}
+
+function drawCarShape(c, team, x, y, l, w) {
+  // Body
+  c.fillStyle = team.color1;
+  c.beginPath();
+  c.roundRect(x - l/2, y - w/2, l, w, 3);
+  c.fill();
+  // Cockpit stripe in secondary color
+  c.fillStyle = team.color2;
+  c.fillRect(x - 2, y - w/2 + 1, 7, w - 2);
+  // Rear wing
+  c.fillStyle = team.color1;
+  c.fillRect(x - l/2 - 3, y - w/2 - 2, 5, w + 4);
+  // Front wing
+  c.fillStyle = team.color2;
+  c.fillRect(x + l/2 - 1, y - w/2 - 1, 5, w + 2);
+}
+
+function drawMiniStandings() {
+  const positions = getPositions().slice(0, 8);
+  const x = CW - 160, y = 50;
+  ctx.fillStyle = 'rgba(0,0,0,.6)';
+  ctx.beginPath();
+  ctx.roundRect(x-8, y-8, 160, positions.length*22+10, 8);
+  ctx.fill();
+
+  positions.forEach((car, i) => {
+    const isP = car.isPlayer;
+    ctx.fillStyle = isP ? '#FFD700' : '#ccc';
+    ctx.font = `bold ${isP?11:10}px Arial`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`${i+1}. ${car.driver.name.split(' ').pop()}`, x, y + i*22);
+    // Color dot
+    ctx.fillStyle = car.team.color1;
     ctx.beginPath();
-    ctx.ellipse(p.x + 4, p.y + 6, PR * 0.85, PR * 0.52, 0, 0, Math.PI*2);
+    ctx.arc(x - 5, y + i*22 + 6, 4, 0, Math.PI*2);
     ctx.fill();
   });
 }
 
-// ===========================
-//  DRAW PLAYERS (jersey style)
-// ===========================
-function drawPlayers() {
-  players.forEach(p => drawJerseyPlayer(p, p === controlledP));
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+// ── UTILS ────────────────────────────────────────────────────
+function isLight(hex) {
+  const v = parseInt(hex.replace('#',''),16);
+  return (0.299*((v>>16)&255)+0.587*((v>>8)&255)+0.114*(v&255)) > 155;
 }
 
-function drawJerseyPlayer(p, isCtrl) {
-  const col = p.data.primaryColor;
-  const alt = p.data.secondaryColor;
-  const R   = PR;
-
-  ctx.save();
-
-  // ── Jersey body (clipped circle) ──
-  ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI*2); ctx.clip();
-
-  // Base primary color fill
-  ctx.fillStyle = col;
-  ctx.fillRect(p.x - R, p.y - R, R*2, R*2);
-
-  // Secondary color horizontal chest stripe
-  ctx.fillStyle = alt;
-  ctx.fillRect(p.x - R, p.y - R*0.32, R*2, R*0.64);
-
-  // Top highlight sheen
-  const sheen = ctx.createLinearGradient(p.x - R, p.y - R, p.x - R, p.y);
-  sheen.addColorStop(0, 'rgba(255,255,255,0.28)');
-  sheen.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = sheen;
-  ctx.fillRect(p.x - R, p.y - R, R*2, R);
-
-  ctx.restore();
-
-  // ── Outline ──
-  ctx.strokeStyle = isCtrl ? '#f5e642' : 'rgba(0,0,0,0.55)';
-  ctx.lineWidth   = isCtrl ? 3.5 : 2.5;
-  ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, Math.PI*2); ctx.stroke();
-
-  // ── Jersey number ──
-  const numCol = isColorLight(alt) ? 'rgba(0,0,0,0.9)' : 'rgba(255,255,255,0.95)';
-  ctx.fillStyle    = numCol;
-  ctx.font         = `bold ${Math.floor(R * 0.72)}px Arial, sans-serif`;
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(p.number, p.x, p.y);
-
-  // ── GK crown indicator ──
-  if (p.role === 'gk') {
-    ctx.fillStyle    = 'rgba(255,215,0,0.9)';
-    ctx.font         = '8px Arial';
-    ctx.textBaseline = 'top';
-    ctx.fillText('GK', p.x, p.y + R + 3);
-  }
-
-  // ── Selection glow ring ──
-  if (isCtrl) {
-    ctx.save();
-    ctx.shadowBlur  = 26;
-    ctx.shadowColor = '#f5e642';
-    ctx.strokeStyle = '#f5e642';
-    ctx.lineWidth   = 2.5;
-    ctx.beginPath(); ctx.arc(p.x, p.y, R + 8, 0, Math.PI*2); ctx.stroke();
-    ctx.restore();
-
-    // arrow above
-    ctx.fillStyle    = '#f5e642';
-    ctx.font         = 'bold 14px Arial';
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText('▼', p.x, p.y - R - 4);
-  }
-}
-
-// ===========================
-//  TEAM LABELS
-// ===========================
-function drawTeamLabels() {
-  // Left team label (player)
-  ctx.fillStyle = 'rgba(255,255,255,0.45)';
-  ctx.font = 'bold 11px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText(playerTeam.shortName, FCX - FW/4, FY - 6);
-  ctx.fillText('CPU: ' + cpuTeam.shortName, FCX + FW/4, FY - 6);
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-}
-
-// ===========================
-//  DRAW BALL
-// ===========================
-function drawBall() {
-  ctx.save();
-
-  // Shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.beginPath(); ctx.ellipse(ball.x+4, ball.y+5, BR, BR*0.55, 0, 0, Math.PI*2); ctx.fill();
-
-  // Gradient sphere
-  const g = ctx.createRadialGradient(ball.x-3, ball.y-3, 1, ball.x, ball.y, BR);
-  g.addColorStop(0,    '#ffffff');
-  g.addColorStop(0.45, '#eeeeee');
-  g.addColorStop(1,    '#aaaaaa');
-  ctx.fillStyle = g;
-  ctx.beginPath(); ctx.arc(ball.x, ball.y, BR, 0, Math.PI*2); ctx.fill();
-
-  // Black patches
-  ctx.fillStyle = '#1a1a1a';
-  pentagon(ball.x, ball.y, BR * 0.38);
-  const d1 = BR * 0.62;
-  [[1,0],[0,1],[-1,0],[0,-1]].forEach(([ox,oy]) => pentagon(ball.x+ox*d1, ball.y+oy*d1, BR*0.26));
-
-  ctx.restore();
-}
-
-function pentagon(cx, cy, r) {
-  ctx.beginPath();
-  for (let i = 0; i < 5; i++) {
-    const a = (i/5)*Math.PI*2 - Math.PI/2;
-    i === 0 ? ctx.moveTo(cx+r*Math.cos(a), cy+r*Math.sin(a))
-            : ctx.lineTo(cx+r*Math.cos(a), cy+r*Math.sin(a));
-  }
-  ctx.closePath(); ctx.fill();
-}
-
-// ===========================
-//  UTILITIES
-// ===========================
-function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
-function lerp(a, b, t) { return a + (b - a) * t; }
-
-function lightenColor(hex, amt) {
-  const v = parseInt(hex.replace('#',''), 16);
-  let r=(v>>16)&255, g=(v>>8)&255, b=v&255;
-  return `rgb(${Math.min(255,r+amt)},${Math.min(255,g+amt)},${Math.min(255,b+amt)})`;
+function showOnly(id) {
+  ['screen-team','screen-driver','screen-race','screen-result','screen-podium','screen-champion'].forEach(s => {
+    document.getElementById(s).classList.toggle('hidden', s !== id);
+  });
 }
